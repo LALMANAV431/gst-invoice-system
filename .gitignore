@@ -12,3 +12,5 @@ prisma/dev.db-journal
 .DS_Store
 .vscode
 .idea
+
+GSTBooks-Portable
