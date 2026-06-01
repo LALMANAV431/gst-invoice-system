@@ -1,15 +1,28 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { setSessionCookie } from "@/lib/auth";
 
+const schema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  password: z.string().min(6, "Password must be at least 6 characters").max(200),
+  companyName: z.string().min(1).max(160),
+  gstin: z.string().max(15).optional().or(z.literal("")),
+  state: z.string().max(80).optional().or(z.literal("")),
+  stateCode: z.string().max(2).optional().or(z.literal("")),
+});
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { name, email, password, companyName, gstin, state, stateCode } = body;
-    if (!name || !email || !password || !companyName) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    const parsed = schema.safeParse(await req.json());
+    if (!parsed.success) {
+      const msg = parsed.error.issues[0]?.message || "Invalid input";
+      return NextResponse.json({ error: msg }, { status: 400 });
     }
+    const { name, email, password, companyName, gstin, state, stateCode } = parsed.data;
+
     const exists = await db.user.findUnique({ where: { email: email.toLowerCase() } });
     if (exists) {
       return NextResponse.json({ error: "Email already registered" }, { status: 409 });
@@ -38,6 +51,6 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || "Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Registration failed" }, { status: 500 });
   }
 }

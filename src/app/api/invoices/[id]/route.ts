@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { writeGuard } from "@/lib/guard";
+import { logAudit } from "@/lib/audit";
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const ctx = await getCurrentUserAndCompany();
@@ -16,6 +18,8 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
 export async function DELETE(_: Request, { params }: { params: { id: string } }) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const blocked = writeGuard(ctx);
+  if (blocked) return blocked;
 
   const invoice = await db.invoice.findFirst({
     where: { id: params.id, companyId: ctx.company.id },
@@ -45,6 +49,14 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
     }
     await tx.payment.deleteMany({ where: { invoiceId: invoice.id } });
     await tx.invoice.delete({ where: { id: invoice.id } });
+  });
+  await logAudit({
+    companyId: ctx.company.id,
+    userId: ctx.user.id,
+    action: "DELETE",
+    entity: "Invoice",
+    entityId: invoice.id,
+    changes: { number: invoice.number },
   });
   return NextResponse.json({ ok: true });
 }

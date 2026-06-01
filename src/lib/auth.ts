@@ -2,7 +2,17 @@ import jwt from "jsonwebtoken";
 import { cookies } from "next/headers";
 import { db } from "./db";
 
-const SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const DEFAULT_DEV_SECRET = "dev-secret-change-me";
+const SECRET = process.env.JWT_SECRET || DEFAULT_DEV_SECRET;
+
+// Fail fast in production if the secret is missing or left at the insecure
+// default — prevents forgeable session tokens.
+if (process.env.NODE_ENV === "production" && (!process.env.JWT_SECRET || SECRET === DEFAULT_DEV_SECRET)) {
+  throw new Error(
+    "JWT_SECRET is not set (or uses the insecure default). Set a long, random JWT_SECRET environment variable before running in production."
+  );
+}
+
 const COOKIE_NAME = "gst_session";
 
 export type SessionPayload = {

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { nextPaymentNumber } from "@/lib/numbering";
+import { writeGuard } from "@/lib/guard";
+import { logAudit } from "@/lib/audit";
 
 export async function GET() {
   const ctx = await getCurrentUserAndCompany();
@@ -17,6 +19,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const blocked = writeGuard(ctx);
+  if (blocked) return blocked;
   const company = ctx.company;
   const body = await req.json();
   const { partyId, invoiceId, purchaseId, type, mode, amount, date, reference, notes } = body;
@@ -68,6 +72,14 @@ export async function POST(req: Request) {
       }
     }
     return created;
+  });
+  await logAudit({
+    companyId: company.id,
+    userId: ctx.user.id,
+    action: "CREATE",
+    entity: "Payment",
+    entityId: payment.id,
+    changes: { number: payment.number, amount: payment.amount, type: payment.type },
   });
   return NextResponse.json(payment);
 }

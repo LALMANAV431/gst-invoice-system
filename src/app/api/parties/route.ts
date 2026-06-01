@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { writeGuard } from "@/lib/guard";
+import { logAudit } from "@/lib/audit";
 
 export async function GET(req: Request) {
   const ctx = await getCurrentUserAndCompany();
@@ -19,6 +21,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const blocked = writeGuard(ctx);
+  if (blocked) return blocked;
   const body = await req.json();
   if (!body.name) return NextResponse.json({ error: "Name required" }, { status: 400 });
   const party = await db.party.create({
@@ -38,6 +42,14 @@ export async function POST(req: Request) {
       openingBalance: parseFloat(body.openingBalance) || 0,
       balanceType: body.balanceType || (body.type === "VENDOR" ? "PAYABLE" : "RECEIVABLE"),
     },
+  });
+  await logAudit({
+    companyId: ctx.company.id,
+    userId: ctx.user.id,
+    action: "CREATE",
+    entity: "Party",
+    entityId: party.id,
+    changes: { name: party.name, type: party.type },
   });
   return NextResponse.json(party);
 }

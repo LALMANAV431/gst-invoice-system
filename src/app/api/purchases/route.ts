@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { calcLineGST } from "@/lib/utils";
 import { nextPurchaseNumber } from "@/lib/numbering";
+import { writeGuard } from "@/lib/guard";
+import { logAudit } from "@/lib/audit";
 
 export async function GET() {
   const ctx = await getCurrentUserAndCompany();
@@ -18,6 +20,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const blocked = writeGuard(ctx);
+  if (blocked) return blocked;
   const company = ctx.company;
   const body = await req.json();
   const { partyId, date, dueDate, vendorBillNo, notes, items, discount, roundOff } = body;
@@ -112,6 +116,15 @@ export async function POST(req: Request) {
       }
     }
     return created;
+  });
+
+  await logAudit({
+    companyId: company.id,
+    userId: ctx.user.id,
+    action: "CREATE",
+    entity: "Purchase",
+    entityId: purchase.id,
+    changes: { number: purchase.number, grandTotal: purchase.grandTotal },
   });
 
   return NextResponse.json(purchase);
