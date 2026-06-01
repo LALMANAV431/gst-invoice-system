@@ -1,0 +1,133 @@
+import { db } from "@/lib/db";
+import { getCurrentUserAndCompany } from "@/lib/auth";
+import { notFound } from "next/navigation";
+import { formatDate, formatINR, numberToWords } from "@/lib/utils";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import QuotationActions from "./QuotationActions";
+
+export default async function QuotationDetailPage({ params }: { params: { id: string } }) {
+  const ctx = await getCurrentUserAndCompany();
+  if (!ctx?.company) return null;
+  const company = ctx.company;
+  const q = await db.quotation.findFirst({
+    where: { id: params.id, companyId: company.id },
+    include: { party: true, items: true },
+  });
+  if (!q) notFound();
+
+  return (
+    <div className="space-y-4 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between no-print">
+        <Link href="/quotations" className="btn-ghost text-sm">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
+        <QuotationActions quotation={JSON.parse(JSON.stringify(q))} />
+      </div>
+
+      <div className="card p-8">
+        <div className="flex justify-between items-start border-b border-slate-200 pb-6">
+          <div>
+            <h1 className="text-2xl font-bold">{company.name}</h1>
+            {company.gstin && <p className="text-sm text-slate-600 mt-1">GSTIN: {company.gstin}</p>}
+            <p className="text-sm text-slate-600">
+              {[company.addressLine1, company.city, company.state, company.pincode]
+                .filter(Boolean)
+                .join(", ")}
+            </p>
+          </div>
+          <div className="text-right">
+            <h2 className="text-3xl font-bold text-brand-600">QUOTATION</h2>
+            <p className="text-sm text-slate-600 mt-2">
+              <strong>{q.number}</strong>
+            </p>
+            <p className="text-sm text-slate-600">Date: {formatDate(q.date)}</p>
+            {q.validUntil && (
+              <p className="text-sm text-slate-600">Valid until: {formatDate(q.validUntil)}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="py-6 border-b border-slate-200">
+          <p className="text-xs uppercase font-semibold text-slate-500">Quote For</p>
+          <p className="mt-1 font-semibold">{q.party.name}</p>
+          {q.party.gstin && <p className="text-sm text-slate-600">GSTIN: {q.party.gstin}</p>}
+          <p className="text-sm text-slate-600">
+            {[q.party.city, q.party.state, q.party.pincode].filter(Boolean).join(", ")}
+          </p>
+        </div>
+
+        <div className="overflow-x-auto py-4">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50">
+                <th className="text-left py-2 px-3">#</th>
+                <th className="text-left py-2 px-3">Item</th>
+                <th className="text-left py-2 px-3">HSN</th>
+                <th className="text-right py-2 px-3">Qty</th>
+                <th className="text-right py-2 px-3">Rate</th>
+                <th className="text-right py-2 px-3">Taxable</th>
+                <th className="text-right py-2 px-3">GST%</th>
+                <th className="text-right py-2 px-3">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {q.items.map((it, i) => (
+                <tr key={it.id} className="border-b border-slate-100">
+                  <td className="py-2 px-3">{i + 1}</td>
+                  <td className="py-2 px-3 font-medium">{it.itemName}</td>
+                  <td className="py-2 px-3">{it.hsn || "—"}</td>
+                  <td className="py-2 px-3 text-right">
+                    {it.quantity} {it.unit}
+                  </td>
+                  <td className="py-2 px-3 text-right">{formatINR(it.rate)}</td>
+                  <td className="py-2 px-3 text-right">{formatINR(it.taxableAmount)}</td>
+                  <td className="py-2 px-3 text-right">{it.gstRate}%</td>
+                  <td className="py-2 px-3 text-right font-semibold">{formatINR(it.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6 pt-4 border-t border-slate-200">
+          <div>
+            <p className="text-xs uppercase font-semibold text-slate-500">Amount in Words</p>
+            <p className="text-sm mt-1 italic">{numberToWords(q.grandTotal)}</p>
+            {q.notes && (
+              <>
+                <p className="text-xs uppercase font-semibold text-slate-500 mt-4">Notes</p>
+                <p className="text-sm mt-1">{q.notes}</p>
+              </>
+            )}
+          </div>
+          <div className="text-sm">
+            <Row label="Subtotal" value={formatINR(q.subTotal)} />
+            {q.isInterState ? (
+              <Row label="IGST" value={formatINR(q.igstTotal)} />
+            ) : (
+              <>
+                <Row label="CGST" value={formatINR(q.cgstTotal)} />
+                <Row label="SGST" value={formatINR(q.sgstTotal)} />
+              </>
+            )}
+            {q.discount > 0 && <Row label="Discount" value={`- ${formatINR(q.discount)}`} />}
+            <div className="flex justify-between border-t border-slate-200 mt-2 pt-2 font-bold text-lg">
+              <span>Grand Total</span>
+              <span>{formatINR(q.grandTotal)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between py-1">
+      <span className="text-slate-500">{label}</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+}
