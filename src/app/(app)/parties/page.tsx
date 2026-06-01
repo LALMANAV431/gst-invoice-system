@@ -5,6 +5,7 @@ import { formatINR } from "@/lib/utils";
 import { Plus, Pencil } from "lucide-react";
 import DeleteButton from "./DeleteButton";
 import EmptyState from "@/components/EmptyState";
+import CsvImport from "@/components/CsvImport";
 
 export const dynamic = "force-dynamic";
 
@@ -61,9 +62,16 @@ export default async function PartiesPage({
           <h1 className="text-2xl font-bold">Parties</h1>
           <p className="text-sm text-slate-500">Customers and vendors</p>
         </div>
-        <Link href="/parties/new" className="btn-primary">
-          <Plus className="h-4 w-4" /> Add Party
-        </Link>
+        <div className="flex gap-2">
+          <CsvImport
+            endpoint="/api/parties/import"
+            label="Import"
+            sampleHeaders={["name", "type", "gstin", "phone", "email", "city", "state", "stateCode", "openingBalance"]}
+          />
+          <Link href="/parties/new" className="btn-primary">
+            <Plus className="h-4 w-4" /> Add Party
+          </Link>
+        </div>
       </div>
 
       <div className="card card-padding">

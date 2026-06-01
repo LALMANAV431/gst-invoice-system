@@ -5,6 +5,7 @@ import { formatINR, formatNumber } from "@/lib/utils";
 import { Plus, Pencil } from "lucide-react";
 import DeleteButton from "./DeleteButton";
 import EmptyState from "@/components/EmptyState";
+import CsvImport from "@/components/CsvImport";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,16 @@ export default async function ItemsPage({ searchParams }: { searchParams: { q?: 
           <h1 className="text-2xl font-bold">Items / Inventory</h1>
           <p className="text-sm text-slate-500">Track products with HSN, GST and stock</p>
         </div>
-        <Link href="/items/new" className="btn-primary">
-          <Plus className="h-4 w-4" /> Add Item
-        </Link>
+        <div className="flex gap-2">
+          <CsvImport
+            endpoint="/api/items/import"
+            label="Import"
+            sampleHeaders={["name", "sku", "hsn", "barcode", "unit", "salePrice", "purchasePrice", "gstRate", "openingStock", "lowStockAlert"]}
+          />
+          <Link href="/items/new" className="btn-primary">
+            <Plus className="h-4 w-4" /> Add Item
+          </Link>
+        </div>
       </div>
 
       <div className="card card-padding">

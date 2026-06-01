@@ -5,6 +5,7 @@ import { formatDate, formatINR, numberToWords } from "@/lib/utils";
 import InvoiceActions from "./InvoiceActions";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import UpiQr from "@/components/UpiQr";
 
 export default async function InvoiceDetailPage({ params }: { params: { id: string } }) {
   const ctx = await getCurrentUserAndCompany();
@@ -208,6 +209,27 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
             )}
           </div>
         </div>
+
+        {(company.upiId || company.bankName) && (
+          <div className="grid sm:grid-cols-2 gap-4 pt-6 border-t border-slate-200 mt-6">
+            {company.bankName && (
+              <div className="text-sm">
+                <p className="text-xs uppercase font-semibold text-slate-500">Bank Details</p>
+                <p className="mt-1">{company.bankName}</p>
+                {company.bankAccountNo && <p>A/C: {company.bankAccountNo}</p>}
+                {company.bankIfsc && <p>IFSC: {company.bankIfsc}</p>}
+              </div>
+            )}
+            {company.upiId && invoice.grandTotal - invoice.amountPaid > 0 && (
+              <UpiQr
+                upiId={company.upiId}
+                payeeName={company.name}
+                amount={invoice.grandTotal - invoice.amountPaid}
+                note={invoice.number}
+              />
+            )}
+          </div>
+        )}
 
         <div className="pt-12 text-center text-xs text-slate-500 border-t border-slate-200 mt-8">
           This is a system-generated invoice.
