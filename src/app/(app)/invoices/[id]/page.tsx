@@ -94,6 +94,38 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
           </div>
         </div>
 
+        {(invoice.irn || invoice.ewayBillNo) && (
+          <div className="grid sm:grid-cols-2 gap-4 py-4 border-b border-slate-200">
+            {invoice.irn && (
+              <div className="rounded-xl bg-violet-50 border border-violet-100 p-3">
+                <p className="text-xs uppercase font-semibold text-violet-700">E-Invoice</p>
+                <p className="text-xs text-slate-600 mt-1 break-all">
+                  <strong>IRN:</strong> {invoice.irn}
+                </p>
+                {invoice.ackNo && (
+                  <p className="text-xs text-slate-600">
+                    <strong>Ack No:</strong> {invoice.ackNo}
+                    {invoice.ackDate ? ` · ${formatDate(invoice.ackDate)}` : ""}
+                  </p>
+                )}
+              </div>
+            )}
+            {invoice.ewayBillNo && (
+              <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
+                <p className="text-xs uppercase font-semibold text-amber-700">E-Way Bill</p>
+                <p className="text-xs text-slate-600 mt-1">
+                  <strong>EWB No:</strong> {invoice.ewayBillNo}
+                </p>
+                {invoice.ewayBillDate && (
+                  <p className="text-xs text-slate-600">
+                    <strong>Date:</strong> {formatDate(invoice.ewayBillDate)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="overflow-x-auto py-4">
           <table className="w-full text-sm">
             <thead>
@@ -154,6 +186,9 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
             )}
             {invoice.discount > 0 && (
               <Row label="Discount" value={`- ${formatINR(invoice.discount)}`} />
+            )}
+            {invoice.tdsAmount > 0 && (
+              <Row label={`TDS (${invoice.tdsRate}%)`} value={`- ${formatINR(invoice.tdsAmount)}`} />
             )}
             {invoice.roundOff !== 0 && (
               <Row label="Round off" value={formatINR(invoice.roundOff)} />

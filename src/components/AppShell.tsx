@@ -24,6 +24,7 @@ import {
   Warehouse,
   Landmark,
   PiggyBank,
+  Crown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +42,7 @@ const NAV = [
   { href: "/bank-reconciliation", label: "Bank Recon", icon: Landmark },
   { href: "/budgets", label: "Budgets", icon: PiggyBank },
   { href: "/reports", label: "Reports", icon: BarChart3 },
+  { href: "/billing", label: "Plans & Billing", icon: Crown },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -81,10 +83,18 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 export default function AppShell({
   userName,
   companyName,
+  planName,
+  planId,
+  invoiceUsed,
+  invoiceLimit,
   children,
 }: {
   userName: string;
   companyName: string;
+  planName: string;
+  planId: string;
+  invoiceUsed: number;
+  invoiceLimit: number | null;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -97,6 +107,16 @@ export default function AppShell({
     router.push("/login");
     router.refresh();
   }
+
+  const planColor =
+    planId === "PREMIUM"
+      ? "bg-amber-50 text-amber-700 ring-amber-600/20"
+      : planId === "BASIC"
+      ? "bg-brand-50 text-brand-700 ring-brand-600/20"
+      : "bg-slate-100 text-slate-600 ring-slate-500/20";
+  const usagePct =
+    invoiceLimit && invoiceLimit > 0 ? Math.min(100, (invoiceUsed / invoiceLimit) * 100) : 0;
+  const nearLimit = invoiceLimit !== null && invoiceUsed >= invoiceLimit * 0.8;
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -112,6 +132,30 @@ export default function AppShell({
           <NavLinks />
         </div>
         <div className="p-3 border-t border-slate-100">
+          <Link
+            href="/billing"
+            className={`block rounded-xl p-3 mb-2 ring-1 ring-inset transition hover:opacity-90 ${planColor}`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold flex items-center gap-1">
+                <Crown className="h-3.5 w-3.5" /> {planName} plan
+              </span>
+              {planId !== "PREMIUM" && <span className="text-[11px] font-semibold underline">Upgrade</span>}
+            </div>
+            {invoiceLimit !== null && (
+              <div className="mt-2">
+                <div className="h-1.5 rounded-full bg-white/60 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${nearLimit ? "bg-rose-500" : "bg-current"}`}
+                    style={{ width: `${usagePct}%` }}
+                  />
+                </div>
+                <div className="mt-1 text-[11px]">
+                  {invoiceUsed}/{invoiceLimit} invoices this month
+                </div>
+              </div>
+            )}
+          </Link>
           <button
             onClick={logout}
             className="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-rose-50 hover:text-rose-600 transition-colors"
@@ -182,6 +226,12 @@ export default function AppShell({
             <div className="flex items-center gap-2 text-sm">
               <Building2 className="h-4 w-4 text-slate-400" />
               <span className="font-semibold text-slate-800">{companyName}</span>
+              <Link
+                href="/billing"
+                className={`hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-inset ${planColor}`}
+              >
+                <Crown className="h-3 w-3" /> {planName}
+              </Link>
             </div>
           </div>
           <div className="flex items-center gap-3">

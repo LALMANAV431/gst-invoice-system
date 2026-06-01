@@ -1,5 +1,5 @@
 "use client";
-import { Download, Printer, Trash2, IndianRupee, MessageCircle, Mail } from "lucide-react";
+import { Download, Printer, Trash2, IndianRupee, MessageCircle, Mail, FileCheck, Truck, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -12,6 +12,7 @@ export default function InvoiceActions({ invoice, company }: { invoice: any; com
   const [recordingPayment, setRecordingPayment] = useState(false);
   const [amount, setAmount] = useState(invoice.grandTotal - invoice.amountPaid);
   const [mode, setMode] = useState("CASH");
+  const [busy, setBusy] = useState<"" | "irn" | "eway">("");
 
   async function onDelete() {
     if (!confirm(`Delete invoice ${invoice.number}? Stock will be restored.`)) return;
@@ -25,6 +26,38 @@ export default function InvoiceActions({ invoice, company }: { invoice: any; com
 
   function onPDF() {
     generateInvoicePDF(invoice, company);
+  }
+
+  async function generateIRN() {
+    setBusy("irn");
+    const res = await fetch(`/api/invoices/${invoice.id}/einvoice`, { method: "POST" });
+    setBusy("");
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      toast.success("E-Invoice IRN generated");
+      router.refresh();
+    } else if (j.upgrade) {
+      toast.error(j.error);
+      router.push("/billing");
+    } else {
+      toast.error(j.error || "Failed");
+    }
+  }
+
+  async function generateEway() {
+    setBusy("eway");
+    const res = await fetch(`/api/invoices/${invoice.id}/eway-bill`, { method: "POST" });
+    setBusy("");
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      toast.success("E-Way Bill generated");
+      router.refresh();
+    } else if (j.upgrade) {
+      toast.error(j.error);
+      router.push("/billing");
+    } else {
+      toast.error(j.error || "Failed");
+    }
   }
 
   async function onRecordPayment(e: React.FormEvent) {
@@ -87,6 +120,29 @@ export default function InvoiceActions({ invoice, company }: { invoice: any; com
       >
         <Mail className="h-4 w-4" /> Email
       </button>
+
+      {invoice.irn ? (
+        <span className="badge-green !px-3 !py-2" title={invoice.irn}>
+          <FileCheck className="h-4 w-4" /> IRN ✓
+        </span>
+      ) : (
+        <button className="btn-secondary !bg-violet-50 !text-violet-700 !border-violet-200 hover:!bg-violet-100" onClick={generateIRN} disabled={busy === "irn"}>
+          {busy === "irn" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCheck className="h-4 w-4" />} E-Invoice
+        </button>
+      )}
+
+      {invoice.ewayBillNo ? (
+        <span className="badge-green !px-3 !py-2" title={invoice.ewayBillNo}>
+          <Truck className="h-4 w-4" /> EWB ✓
+        </span>
+      ) : (
+        invoice.grandTotal >= 50000 && (
+          <button className="btn-secondary !bg-amber-50 !text-amber-700 !border-amber-200 hover:!bg-amber-100" onClick={generateEway} disabled={busy === "eway"}>
+            {busy === "eway" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />} E-Way Bill
+          </button>
+        )
+      )}
+
       <button className="btn-ghost text-rose-600" onClick={onDelete}>
         <Trash2 className="h-4 w-4" />
       </button>

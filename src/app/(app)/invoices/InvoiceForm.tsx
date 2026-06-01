@@ -135,6 +135,7 @@ export default function InvoiceForm({
   const [notes, setNotes] = useState("");
   const [discount, setDiscount] = useState(0);
   const [roundOff, setRoundOff] = useState(0);
+  const [tdsRate, setTdsRate] = useState(0);
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [loading, setLoading] = useState(false);
 
@@ -164,16 +165,18 @@ export default function InvoiceForm({
       igst += r.igst;
     }
     const tax = +(cgst + sgst + igst).toFixed(2);
-    const grand = +(subTotal + tax - (discount || 0) + (roundOff || 0)).toFixed(2);
+    const tdsAmt = mode === "sales" ? +((subTotal * (tdsRate || 0)) / 100).toFixed(2) : 0;
+    const grand = +(subTotal + tax - (discount || 0) + (roundOff || 0) - tdsAmt).toFixed(2);
     return {
       subTotal: +subTotal.toFixed(2),
       cgst: +cgst.toFixed(2),
       sgst: +sgst.toFixed(2),
       igst: +igst.toFixed(2),
       tax,
+      tdsAmt,
       grand,
     };
-  }, [lines, discount, roundOff, isInterState]);
+  }, [lines, discount, roundOff, isInterState, tdsRate, mode]);
 
   function updateLine(i: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
@@ -218,6 +221,7 @@ export default function InvoiceForm({
         notes,
         discount,
         roundOff,
+        tdsRate: mode === "sales" ? tdsRate : 0,
         items: valid,
       }),
     });
@@ -230,6 +234,7 @@ export default function InvoiceForm({
     } else {
       const j = await res.json().catch(() => ({}));
       toast.error(j.error || "Failed");
+      if (j.upgrade) router.push("/billing");
     }
   }
 
@@ -496,6 +501,25 @@ export default function InvoiceForm({
               onChange={(e) => setRoundOff(parseFloat(e.target.value) || 0)}
             />
           </div>
+          {mode === "sales" && (
+            <div className="flex items-center justify-between text-sm py-1.5">
+              <span className="text-slate-500">TDS %</span>
+              <select
+                className="input w-28 text-right"
+                value={tdsRate}
+                onChange={(e) => setTdsRate(parseFloat(e.target.value) || 0)}
+              >
+                {[0, 0.1, 1, 2, 5, 10].map((r) => (
+                  <option key={r} value={r}>
+                    {r}%
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {mode === "sales" && totals.tdsAmt > 0 && (
+            <Row label="TDS deducted" value={`- ${formatINR(totals.tdsAmt)}`} />
+          )}
           <div className="border-t border-slate-200 mt-2 pt-2 flex items-center justify-between">
             <span className="font-bold">Grand Total</span>
             <span className="font-bold text-lg">{formatINR(totals.grand)}</span>

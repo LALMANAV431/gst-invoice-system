@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { calcLineGST } from "@/lib/utils";
 import { nextInvoiceNumber } from "@/lib/numbering";
+import { planActive, invoiceLimitFor, getPlan } from "@/lib/plan";
 
 export async function GET() {
   const ctx = await getCurrentUserAndCompany();
@@ -20,11 +21,33 @@ export async function POST(req: Request) {
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const company = ctx.company;
   const body = await req.json();
-  const { partyId, date, dueDate, notes, items, discount, roundOff } = body;
+  const { partyId, date, dueDate, notes, items, discount, roundOff, tdsRate } = body;
 
   if (!partyId) return NextResponse.json({ error: "Party required" }, { status: 400 });
   if (!Array.isArray(items) || items.length === 0)
     return NextResponse.json({ error: "Add at least one item" }, { status: 400 });
+
+  // ---- Plan limit enforcement (monthly invoice cap) ----
+  const activePlan = planActive(company.plan, company.planExpiry);
+  const limit = invoiceLimitFor(activePlan);
+  if (limit !== Infinity) {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const usedThisMonth = await db.invoice.count({
+      where: { companyId: company.id, date: { gte: monthStart } },
+    });
+    if (usedThisMonth >= limit) {
+      return NextResponse.json(
+        {
+          error: `You've reached the ${getPlan(activePlan).name} plan limit of ${limit} invoices this month. Upgrade to create more.`,
+          code: "PLAN_LIMIT",
+          upgrade: true,
+        },
+        { status: 402 }
+      );
+    }
+  }
 
   const party = await db.party.findFirst({ where: { id: partyId, companyId: company.id } });
   if (!party) return NextResponse.json({ error: "Invalid party" }, { status: 400 });
@@ -70,7 +93,10 @@ export async function POST(req: Request) {
   const invDiscount = parseFloat(discount) || 0;
   const invRoundOff = parseFloat(roundOff) || 0;
   const taxTotal = +(cgstTotal + sgstTotal + igstTotal).toFixed(2);
-  const grandTotal = +(subTotal + taxTotal - invDiscount + invRoundOff).toFixed(2);
+  // TDS is deducted on taxable value and reduces net receivable
+  const tdsRateNum = parseFloat(tdsRate) || 0;
+  const tdsAmount = +((subTotal * tdsRateNum) / 100).toFixed(2);
+  const grandTotal = +(subTotal + taxTotal - invDiscount + invRoundOff - tdsAmount).toFixed(2);
 
   const number = await nextInvoiceNumber(company.id, company.invoicePrefix);
 
@@ -90,6 +116,8 @@ export async function POST(req: Request) {
         taxTotal,
         discount: invDiscount,
         roundOff: invRoundOff,
+        tdsRate: tdsRateNum,
+        tdsAmount,
         grandTotal,
         isInterState,
         status: "UNPAID",

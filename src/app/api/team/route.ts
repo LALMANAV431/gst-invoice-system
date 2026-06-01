@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import bcrypt from "bcryptjs";
+import { hasFeature, planActive } from "@/lib/plan";
 
 export async function GET() {
   const ctx = await getCurrentUserAndCompany();
@@ -17,6 +18,11 @@ export async function GET() {
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!hasFeature(planActive(ctx.company.plan, ctx.company.planExpiry), "multi_user"))
+    return NextResponse.json(
+      { error: "Multi-user team access requires the Premium plan. Please upgrade.", code: "PLAN_LIMIT", upgrade: true },
+      { status: 402 }
+    );
   const body = await req.json();
   const { email, name, password, role } = body;
   if (!email || !name || !password)
