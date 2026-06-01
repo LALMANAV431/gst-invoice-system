@@ -1,0 +1,17 @@
+node_modules
+.next
+out
+build
+dist
+*.log
+.env
+.env.local
+.env*.local
+prisma/dev.db
+prisma/dev.db-journal
+.DS_Store
+.vscode
+.idea
+
+GSTBooks-Portable
+*.tsbuildinfo
