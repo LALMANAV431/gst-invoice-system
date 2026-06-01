@@ -14,3 +14,4 @@ prisma/dev.db-journal
 .idea
 
 GSTBooks-Portable
+*.tsbuildinfo

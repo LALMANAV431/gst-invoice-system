@@ -7,15 +7,29 @@ async function main() {
   const email = "demo@gst.com";
   const password = await bcrypt.hash("demo1234", 10);
 
-  // Wipe & re-seed
+  // Wipe & re-seed (order matters for FK constraints — children first)
   await prisma.stockMovement.deleteMany();
+  await prisma.stockTransfer.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.invoiceItem.deleteMany();
   await prisma.invoice.deleteMany();
   await prisma.purchaseItem.deleteMany();
   await prisma.purchase.deleteMany();
+  await prisma.quotationItem.deleteMany();
+  await prisma.quotation.deleteMany();
+  await prisma.creditNoteItem.deleteMany();
+  await prisma.creditNote.deleteMany();
+  await prisma.expense.deleteMany();
+  await prisma.supportTicket.deleteMany();
+  await prisma.broadcast.deleteMany();
+  await prisma.recurringInvoice.deleteMany();
+  await prisma.bankTransaction.deleteMany();
+  await prisma.budget.deleteMany();
+  await prisma.godown.deleteMany();
+  await prisma.auditLog.deleteMany();
   await prisma.item.deleteMany();
   await prisma.party.deleteMany();
+  await prisma.teamMember.deleteMany();
   await prisma.company.deleteMany();
   await prisma.user.deleteMany();
 
