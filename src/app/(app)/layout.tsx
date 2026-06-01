@@ -30,6 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       planId={activePlan}
       invoiceUsed={invoiceUsed}
       invoiceLimit={limit === Infinity ? null : limit}
+      isSuperAdmin={user.isSuperAdmin}
     >
       {children}
     </AppShell>

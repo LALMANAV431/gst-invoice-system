@@ -11,13 +11,14 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      String   @default("ADMIN") // ADMIN | ACCOUNTANT | OPERATOR | VIEWER
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String
+  name         String
+  role         String   @default("ADMIN") // ADMIN | ACCOUNTANT | OPERATOR | VIEWER
+  isSuperAdmin Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   companies   Company[]
   memberships TeamMember[]
@@ -66,6 +67,7 @@ model Company {
   upiId         String?
   plan          String   @default("FREE") // FREE | BASIC | PREMIUM
   planExpiry    DateTime?
+  isSuspended   Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -546,4 +548,43 @@ model AuditLog {
   user      User    @relation(fields: [userId], references: [id])
 
   @@index([companyId, entity, createdAt])
+}
+
+
+// ======================== PLATFORM / SUPER-ADMIN ========================
+
+// Key-value store for global site settings (contact, social, announcement, etc.)
+model SiteSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String?
+  updatedAt DateTime @updatedAt
+}
+
+// Discount coupons applied at subscription checkout
+model Coupon {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  description    String?
+  type           String    @default("PERCENT") // PERCENT | FLAT
+  value          Float     @default(0)
+  appliesToPlan  String?   // BASIC | PREMIUM | null = any paid plan
+  maxRedemptions Int?      // null = unlimited
+  timesRedeemed  Int       @default(0)
+  active         Boolean   @default(true)
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+// Editable plan pricing/limits (overrides code defaults)
+model PlanSetting {
+  id           String   @id // FREE | BASIC | PREMIUM
+  name         String
+  tagline      String?
+  priceMonthly Float    @default(0)
+  priceAnnual  Float    @default(0)
+  invoiceLimit Int      @default(-1) // -1 = unlimited
+  userLimit    Int      @default(1)
+  active       Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
 }

@@ -62,3 +62,12 @@ export async function getCurrentUserAndCompany() {
     : user.companies[0];
   return { user, company, companies: user.companies };
 }
+
+/** Returns the current user if they are a platform super-admin, else null. */
+export async function getSuperAdmin() {
+  const s = await getSession();
+  if (!s) return null;
+  const user = await db.user.findUnique({ where: { id: s.userId } });
+  if (!user || !user.isSuperAdmin) return null;
+  return user;
+}

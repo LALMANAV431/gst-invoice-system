@@ -26,6 +26,7 @@ import {
   PiggyBank,
   Crown,
   ScanLine,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -92,6 +93,7 @@ export default function AppShell({
   planId,
   invoiceUsed,
   invoiceLimit,
+  isSuperAdmin,
   children,
 }: {
   userName: string;
@@ -100,6 +102,7 @@ export default function AppShell({
   planId: string;
   invoiceUsed: number;
   invoiceLimit: number | null;
+  isSuperAdmin?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -241,6 +244,14 @@ export default function AppShell({
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
+            {isSuperAdmin && (
+              <Link
+                href="/admin"
+                className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-300"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" /> Admin
+              </Link>
+            )}
             <Link href="/pos" className="btn-secondary hidden sm:inline-flex !py-2 !px-3.5">
               POS
             </Link>

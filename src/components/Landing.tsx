@@ -34,9 +34,24 @@ const stats = [
   { value: "0₹", label: "To get started" },
 ];
 
-export default function Landing() {
+export default function Landing({
+  announcement = "",
+  supportPhone = "",
+  supportEmail = "",
+  address = "",
+}: {
+  announcement?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+  address?: string;
+}) {
   return (
     <div className="min-h-screen mesh-bg overflow-hidden">
+      {announcement && (
+        <div className="relative z-50 bg-gradient-to-r from-brand-600 to-indigo-600 text-white text-sm text-center py-2 px-4 font-medium">
+          {announcement}
+        </div>
+      )}
       {/* Animated background blobs */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute top-[-10%] left-[10%] h-72 w-72 rounded-full bg-brand-300/30 blur-3xl animate-blob" />
@@ -247,6 +262,13 @@ export default function Landing() {
             </div>
             <span className="font-semibold text-slate-700">GST Books</span>
           </div>
+          {(supportPhone || supportEmail || address) && (
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 mb-2 text-slate-600">
+              {supportPhone && <span>📞 {supportPhone}</span>}
+              {supportEmail && <span>✉️ {supportEmail}</span>}
+              {address && <span>📍 {address}</span>}
+            </div>
+          )}
           Made in India for Indian SMBs · © {new Date().getFullYear()}
         </footer>
       </main>

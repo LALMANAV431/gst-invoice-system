@@ -110,3 +110,37 @@ export function hasFeature(planId: string | null | undefined, feature: Feature):
 export function invoiceLimitFor(planId: string | null | undefined): number {
   return getPlan(planId).invoiceLimit;
 }
+
+
+import { db } from "./db";
+
+/**
+ * Merge DB PlanSetting overrides on top of the hardcoded PLANS defaults.
+ * Lets the SaaS owner edit prices/limits from the admin dashboard.
+ */
+export async function getEffectivePlans(): Promise<Record<PlanId, PlanConfig & { priceAnnual: number }>> {
+  const defaults: Record<PlanId, PlanConfig & { priceAnnual: number }> = {
+    FREE: { ...PLANS.FREE, priceAnnual: 0 },
+    BASIC: { ...PLANS.BASIC, priceAnnual: 2990 },
+    PREMIUM: { ...PLANS.PREMIUM, priceAnnual: 9990 },
+  };
+  try {
+    const rows = await db.planSetting.findMany();
+    for (const r of rows) {
+      const id = r.id as PlanId;
+      if (!defaults[id]) continue;
+      defaults[id] = {
+        ...defaults[id],
+        name: r.name ?? defaults[id].name,
+        tagline: r.tagline ?? defaults[id].tagline,
+        price: r.priceMonthly,
+        priceAnnual: r.priceAnnual,
+        invoiceLimit: r.invoiceLimit < 0 ? Infinity : r.invoiceLimit,
+        userLimit: r.userLimit,
+      };
+    }
+  } catch {
+    // table may not exist yet (pre-migration) — fall back to defaults
+  }
+  return defaults;
+}

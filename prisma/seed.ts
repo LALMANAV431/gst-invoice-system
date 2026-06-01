@@ -20,7 +20,7 @@ async function main() {
   await prisma.user.deleteMany();
 
   const user = await prisma.user.create({
-    data: { email, password, name: "Demo User" },
+    data: { email, password, name: "Demo User", isSuperAdmin: true },
   });
 
   const company = await prisma.company.create({
@@ -96,8 +96,44 @@ async function main() {
     });
   }
 
+  // ---- Platform / super-admin data ----
+  await prisma.siteSetting.deleteMany();
+  await prisma.coupon.deleteMany();
+  await prisma.planSetting.deleteMany();
+
+  const siteSettings: Record<string, string> = {
+    site_name: "GST Books",
+    support_phone: "+91 90000 00000",
+    support_email: "support@gstbooks.in",
+    whatsapp_number: "+919000000000",
+    address: "Mumbai, Maharashtra, India",
+    announcement: "🎉 New: POS billing with barcode scanner is now live!",
+    announcement_active: "true",
+    facebook_url: "",
+    instagram_url: "",
+    twitter_url: "",
+  };
+  for (const [key, value] of Object.entries(siteSettings)) {
+    await prisma.siteSetting.create({ data: { key, value } });
+  }
+
+  await prisma.planSetting.createMany({
+    data: [
+      { id: "FREE", name: "Free", tagline: "For freelancers & new businesses", priceMonthly: 0, priceAnnual: 0, invoiceLimit: 20, userLimit: 1 },
+      { id: "BASIC", name: "Basic", tagline: "For growing small businesses", priceMonthly: 299, priceAnnual: 2990, invoiceLimit: -1, userLimit: 3 },
+      { id: "PREMIUM", name: "Premium", tagline: "Full Tally/Busy replacement", priceMonthly: 999, priceAnnual: 9990, invoiceLimit: -1, userLimit: 25 },
+    ],
+  });
+
+  await prisma.coupon.createMany({
+    data: [
+      { code: "WELCOME20", description: "20% off first subscription", type: "PERCENT", value: 20, active: true },
+      { code: "FLAT100", description: "Flat ₹100 off", type: "FLAT", value: 100, appliesToPlan: "BASIC", active: true },
+    ],
+  });
+
   console.log("\n✅ Seed complete!");
-  console.log("   Login: demo@gst.com / demo1234");
+  console.log("   Login: demo@gst.com / demo1234  (also Super Admin → /admin)");
 }
 
 main()
