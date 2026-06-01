@@ -16,6 +16,26 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
   }
 
+  // If a coupon code was applied, validate and record the redemption
+  let appliedCoupon: string | null = null;
+  if (body.coupon && planId !== "FREE") {
+    const code = String(body.coupon).trim().toUpperCase();
+    const coupon = await db.coupon.findUnique({ where: { code } });
+    const valid =
+      coupon &&
+      coupon.active &&
+      (!coupon.expiresAt || coupon.expiresAt.getTime() >= Date.now()) &&
+      (coupon.maxRedemptions == null || coupon.timesRedeemed < coupon.maxRedemptions) &&
+      (!coupon.appliesToPlan || coupon.appliesToPlan === planId);
+    if (valid) {
+      await db.coupon.update({
+        where: { id: coupon!.id },
+        data: { timesRedeemed: { increment: 1 } },
+      });
+      appliedCoupon = code;
+    }
+  }
+
   // Set expiry 30 days out for paid plans; FREE has no expiry
   const expiry =
     planId === "FREE" ? null : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -29,5 +49,6 @@ export async function POST(req: Request) {
     ok: true,
     plan: updated.plan,
     planExpiry: updated.planExpiry,
+    appliedCoupon,
   });
 }

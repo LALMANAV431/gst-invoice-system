@@ -50,6 +50,18 @@ export default function AdminCompaniesPage() {
     } else toast.error("Failed");
   }
 
+  async function impersonate(c: Company) {
+    if (!confirm(`View the app as "${c.name}"? You can exit anytime from the banner.`)) return;
+    const res = await fetch("/api/admin/impersonate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ companyId: c.id }),
+    });
+    if (res.ok) {
+      window.location.href = "/dashboard";
+    } else toast.error("Failed to impersonate");
+  }
+
   const filtered = companies.filter(
     (c) =>
       c.name.toLowerCase().includes(q.toLowerCase()) ||
@@ -119,16 +131,24 @@ export default function AdminCompaniesPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => toggleSuspend(c)}
-                        className={`text-xs font-semibold px-3 py-1.5 rounded-lg ${
-                          c.isSuspended
-                            ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                            : "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20"
-                        }`}
-                      >
-                        {c.isSuspended ? "Reactivate" : "Suspend"}
-                      </button>
+                      <div className="inline-flex items-center gap-2">
+                        <button
+                          onClick={() => impersonate(c)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
+                        >
+                          View as
+                        </button>
+                        <button
+                          onClick={() => toggleSuspend(c)}
+                          className={`text-xs font-semibold px-3 py-1.5 rounded-lg ${
+                            c.isSuspended
+                              ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                              : "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20"
+                          }`}
+                        >
+                          {c.isSuspended ? "Reactivate" : "Suspend"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

@@ -27,36 +27,48 @@ import {
   Crown,
   ScanLine,
   ShieldCheck,
+  LifeBuoy,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ThemeToggle from "@/components/ThemeToggle";
 
-const NAV = [
+type NavItem = { href: string; label: string; icon: any; flag?: string };
+
+const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pos", label: "POS Billing", icon: ScanLine },
+  { href: "/pos", label: "POS Billing", icon: ScanLine, flag: "flag_pos" },
   { href: "/parties", label: "Parties", icon: Users },
   { href: "/items", label: "Items", icon: Boxes },
-  { href: "/quotations", label: "Quotations", icon: FileSpreadsheet },
+  { href: "/quotations", label: "Quotations", icon: FileSpreadsheet, flag: "flag_quotations" },
   { href: "/invoices", label: "Sales Invoices", icon: FileText },
   { href: "/purchases", label: "Purchases", icon: ShoppingCart },
-  { href: "/credit-notes", label: "Credit/Debit Notes", icon: RotateCcw },
+  { href: "/credit-notes", label: "Credit/Debit Notes", icon: RotateCcw, flag: "flag_credit_notes" },
   { href: "/payments", label: "Payments", icon: IndianRupee },
-  { href: "/expenses", label: "Expenses", icon: Wallet },
-  { href: "/godowns", label: "Godowns", icon: Warehouse },
-  { href: "/bank-reconciliation", label: "Bank Recon", icon: Landmark },
-  { href: "/budgets", label: "Budgets", icon: PiggyBank },
+  { href: "/expenses", label: "Expenses", icon: Wallet, flag: "flag_expenses" },
+  { href: "/godowns", label: "Godowns", icon: Warehouse, flag: "flag_godowns" },
+  { href: "/bank-reconciliation", label: "Bank Recon", icon: Landmark, flag: "flag_bank" },
+  { href: "/budgets", label: "Budgets", icon: PiggyBank, flag: "flag_budgets" },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/billing", label: "Plans & Billing", icon: Crown },
+  { href: "/support", label: "Help & Support", icon: LifeBuoy },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavLinks({
+  onNavigate,
+  flags,
+}: {
+  onNavigate?: () => void;
+  flags?: Record<string, boolean>;
+}) {
   const pathname = usePathname();
+  const items = NAV.filter((it) => !it.flag || !flags || flags[it.flag] !== false);
   return (
     <nav className="p-3 space-y-1">
-      {NAV.map((it) => {
+      {items.map((it) => {
         const active = pathname === it.href || pathname.startsWith(it.href + "/");
         return (
           <Link
@@ -94,6 +106,8 @@ export default function AppShell({
   invoiceUsed,
   invoiceLimit,
   isSuperAdmin,
+  flags,
+  impersonating,
   children,
 }: {
   userName: string;
@@ -103,6 +117,8 @@ export default function AppShell({
   invoiceUsed: number;
   invoiceLimit: number | null;
   isSuperAdmin?: boolean;
+  flags?: Record<string, boolean>;
+  impersonating?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -113,6 +129,13 @@ export default function AppShell({
     await fetch("/api/auth/logout", { method: "POST" });
     toast.success("Logged out");
     router.push("/login");
+    router.refresh();
+  }
+
+  async function stopImpersonating() {
+    await fetch("/api/admin/impersonate/stop", { method: "POST" });
+    toast.success("Returned to admin");
+    router.push("/admin/companies");
     router.refresh();
   }
 
@@ -137,7 +160,7 @@ export default function AppShell({
           <span className="font-bold tracking-tight">GST Books</span>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <NavLinks />
+          <NavLinks flags={flags} />
         </div>
         <div className="p-3 border-t border-slate-100 dark:border-slate-800">
           <Link
@@ -204,7 +227,7 @@ export default function AppShell({
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto">
-                <NavLinks onNavigate={() => setMobileOpen(false)} />
+                <NavLinks onNavigate={() => setMobileOpen(false)} flags={flags} />
               </div>
               <div className="p-3 border-t border-slate-100">
                 <button
@@ -221,6 +244,18 @@ export default function AppShell({
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
+        {impersonating && (
+          <div className="bg-amber-500 text-slate-900 text-sm font-medium px-4 py-2 flex items-center justify-center gap-3">
+            <Eye className="h-4 w-4" />
+            Viewing as <strong>{companyName}</strong> (admin impersonation)
+            <button
+              onClick={stopImpersonating}
+              className="ml-2 rounded-lg bg-slate-900 text-white px-2.5 py-1 text-xs font-semibold hover:bg-slate-800"
+            >
+              Exit
+            </button>
+          </div>
+        )}
         {/* Topbar */}
         <header className="sticky top-0 z-30 glass border-b border-slate-200/70 px-4 md:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">

@@ -588,3 +588,27 @@ model PlanSetting {
   active       Boolean  @default(true)
   updatedAt    DateTime @updatedAt
 }
+
+
+// Support tickets raised by company users, answered by the super-admin
+model SupportTicket {
+  id        String   @id @default(cuid())
+  companyId String?
+  userEmail String?
+  userName  String?
+  subject   String
+  message   String
+  status    String   @default("OPEN") // OPEN | RESOLVED
+  reply     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Broadcast messages composed by the super-admin
+model Broadcast {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  channel   String   @default("ALL") // ALL | EMAIL | WHATSAPP
+  createdAt DateTime @default(now())
+}

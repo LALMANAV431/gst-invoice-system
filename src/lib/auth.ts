@@ -9,6 +9,7 @@ export type SessionPayload = {
   userId: string;
   email: string;
   companyId?: string;
+  impersonatorId?: string;
 };
 
 export function signSession(payload: SessionPayload): string {

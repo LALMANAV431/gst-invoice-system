@@ -1,13 +1,15 @@
 import { redirect } from "next/navigation";
-import { getCurrentUserAndCompany } from "@/lib/auth";
+import { getCurrentUserAndCompany, getSession } from "@/lib/auth";
 import AppShell from "@/components/AppShell";
 import { db } from "@/lib/db";
 import { planActive, invoiceLimitFor, getPlan } from "@/lib/plan";
+import { getFeatureFlags } from "@/lib/settings";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx) redirect("/login");
   const { user, company } = ctx;
+  const session = await getSession();
 
   // Plan + monthly invoice usage for the topbar meter
   const activePlan = company ? planActive(company.plan, company.planExpiry) : "FREE";
@@ -21,6 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     });
   }
   const limit = invoiceLimitFor(activePlan);
+  const flags = await getFeatureFlags();
 
   return (
     <AppShell
@@ -31,6 +34,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       invoiceUsed={invoiceUsed}
       invoiceLimit={limit === Infinity ? null : limit}
       isSuperAdmin={user.isSuperAdmin}
+      flags={flags}
+      impersonating={!!session?.impersonatorId}
     >
       {children}
     </AppShell>

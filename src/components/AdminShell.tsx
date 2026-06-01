@@ -10,14 +10,22 @@ import {
   Settings,
   ArrowLeft,
   ShieldCheck,
+  Flag,
+  LifeBuoy,
+  Megaphone,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/companies", label: "Companies", icon: Building2 },
+  { href: "/admin/activity", label: "Activity", icon: Activity },
   { href: "/admin/coupons", label: "Coupons", icon: Ticket },
   { href: "/admin/pricing", label: "Pricing", icon: IndianRupee },
+  { href: "/admin/flags", label: "Feature Flags", icon: Flag },
+  { href: "/admin/tickets", label: "Support", icon: LifeBuoy },
+  { href: "/admin/broadcast", label: "Broadcast", icon: Megaphone },
   { href: "/admin/settings", label: "Site Settings", icon: Settings },
 ];
 
