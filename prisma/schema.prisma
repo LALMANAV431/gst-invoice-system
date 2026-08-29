@@ -39,6 +39,9 @@ model User {
   name         String
   role         String   @default("ADMIN") // ADMIN | ACCOUNTANT | OPERATOR | VIEWER
   isSuperAdmin Boolean  @default(false)
+  // UI language: "en" | "hi". Stored on the user rather than in a cookie so the
+  // choice follows them across devices.
+  locale       String   @default("en")
   // Bumped to invalidate every existing JWT for this user (logout-everywhere,
   // password change, suspension). Checked on each request.
   tokenVersion Int      @default(0)

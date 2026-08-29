@@ -139,6 +139,15 @@ async function main() {
   const email = "demo@gst.com";
   const password = await bcrypt.hash("demo1234", 10);
 
+  // Dates and the financial year are derived from TODAY, so the demo data always
+  // sits inside the current FY no matter when the seed is run.
+  const today = new Date();
+  const daysAgo = (n: number) => new Date(today.getTime() - n * 86400000);
+  const fyStartYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+  const fyLabel = `${fyStartYear}-${String((fyStartYear + 1) % 100).padStart(2, "0")}`;
+  // "2026-27" -> "26-27", matching formatDocumentNumber().
+  const fyShort = fyLabel.slice(2);
+
   // Wipe & re-seed. Children before parents for FK safety.
   await prisma.journalEntryLine.deleteMany();
   await prisma.journalEntry.deleteMany();
@@ -190,18 +199,27 @@ async function main() {
       state: "Maharashtra",
       stateCode: "27",
       pincode: "400001",
-      financialYear: "2025-26",
+      financialYear: fyLabel,
     },
   });
 
-  // Financial year, so period locking has something to enforce against.
+  // Financial year, derived from TODAY rather than hardcoded.
+  //
+  // A hardcoded "2025-26" meant the demo transactions (dated relative to today)
+  // fell outside it, so period locking had nothing to guard and year-closing
+  // reported "no entries to close" — the features existed but could not be
+  // demonstrated. The FY must contain the data seeded into it.
   await prisma.financialYear.create({
     data: {
       companyId: company.id,
-      label: "2025-26",
-      startDate: new Date(2025, 3, 1),
-      endDate: new Date(2026, 2, 31, 23, 59, 59, 999),
+      label: fyLabel,
+      startDate: new Date(fyStartYear, 3, 1),
+      endDate: new Date(fyStartYear + 1, 2, 31, 23, 59, 59, 999),
     },
+  });
+  await prisma.company.update({
+    where: { id: company.id },
+    data: { financialYear: fyLabel },
   });
 
   const groupIds = await seedChartOfAccounts(company.id);
@@ -325,7 +343,7 @@ async function main() {
     });
 
     invoiceSeq += 1;
-    const number = `INV/25-26/${String(invoiceSeq).padStart(4, "0")}`;
+    const number = `INV/${fyShort}/${String(invoiceSeq).padStart(4, "0")}`;
 
     const invoice = await prisma.invoice.create({
       data: {
@@ -416,7 +434,7 @@ async function main() {
     );
 
     if (opts.payNow) {
-      const payNumber = `PMT/25-26/${String(invoiceSeq).padStart(4, "0")}`;
+      const payNumber = `PMT/${fyShort}/${String(invoiceSeq).padStart(4, "0")}`;
       const payment = await prisma.payment.create({
         data: {
           companyId: company.id,
@@ -451,9 +469,6 @@ async function main() {
 
     return invoice;
   }
-
-  const today = new Date();
-  const daysAgo = (n: number) => new Date(today.getTime() - n * 86400000);
 
   // Intra-state, paid in full.
   await createDemoInvoice({
@@ -514,7 +529,7 @@ async function main() {
       roundToNearestRupee: true,
     });
 
-    const number = "PUR/25-26/0001";
+    const number = `PUR/${fyShort}/0001`;
     const date = daysAgo(25);
     const purchase = await prisma.purchase.create({
       data: {
@@ -598,7 +613,7 @@ async function main() {
   // ---- Opening capital, so the balance sheet has an equity side ---------
   {
     const capitalPaise = toPaise(500000); // Rs 5,00,000
-    const date = new Date(2025, 3, 1);
+    const date = new Date(fyStartYear, 3, 1);
     await postEntry(
       company.id,
       user.id,
@@ -611,7 +626,7 @@ async function main() {
           { ledger: LEDGER.CAPITAL, creditPaise: capitalPaise },
         ],
       },
-      "OPENING/25-26/0001"
+      `OPENING/${fyShort}/0001`
     );
   }
 
@@ -619,9 +634,9 @@ async function main() {
   // restarting at 1 and colliding with the demo numbers above.
   await prisma.documentCounter.createMany({
     data: [
-      { companyId: company.id, documentType: "INVOICE", financialYear: "2025-26", prefix: "INV", lastNumber: invoiceSeq },
-      { companyId: company.id, documentType: "PAYMENT", financialYear: "2025-26", prefix: "PMT", lastNumber: invoiceSeq },
-      { companyId: company.id, documentType: "PURCHASE", financialYear: "2025-26", prefix: "PUR", lastNumber: 1 },
+      { companyId: company.id, documentType: "INVOICE", financialYear: fyLabel, prefix: "INV", lastNumber: invoiceSeq },
+      { companyId: company.id, documentType: "PAYMENT", financialYear: fyLabel, prefix: "PMT", lastNumber: invoiceSeq },
+      { companyId: company.id, documentType: "PURCHASE", financialYear: fyLabel, prefix: "PUR", lastNumber: 1 },
     ],
   });
 

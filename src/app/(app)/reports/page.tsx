@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { getTranslator, normaliseLocale } from "@/lib/i18n";
 import { formatPaise, formatNumber } from "@/lib/utils";
 import { TrendingUp, TrendingDown, Receipt, Package, FileSpreadsheet, BookOpen, Users as UsersIcon, Clock, FileJson, Scale, LineChart, Landmark, Percent } from "lucide-react";
 
@@ -14,6 +15,7 @@ export default async function ReportsPage({
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return null;
   const companyId = ctx.company.id;
+  const { t } = getTranslator(normaliseLocale(ctx.user.locale));
 
   const from = searchParams.from ? new Date(searchParams.from) : new Date(new Date().getFullYear(), 0, 1);
   const to = searchParams.to ? new Date(searchParams.to) : new Date();
@@ -64,21 +66,23 @@ export default async function ReportsPage({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Reports</h1>
-          <p className="text-sm text-slate-500">Financial reports and GST summary</p>
+          <h1 className="text-2xl font-bold">{t("report.title")}</h1>
+          <p className="text-sm text-slate-500">{t("report.subtitle")}</p>
         </div>
       </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { href: "/reports/day-book", label: "Day Book", desc: "All vouchers by date", icon: BookOpen, color: "text-brand-600 bg-brand-50" },
-          { href: "/reports/ledger", label: "Party Ledger", desc: "Statement of account", icon: UsersIcon, color: "text-violet-600 bg-violet-50" },
-          { href: "/reports/outstanding", label: "Outstanding", desc: "Receivables & aging", icon: Clock, color: "text-amber-600 bg-amber-50" },
-          { href: "/reports/gstr1", label: "GSTR-1", desc: "B2B, B2C, HSN + JSON", icon: FileJson, color: "text-emerald-600 bg-emerald-50" },
-          { href: "/reports/trial-balance", label: "Trial Balance", desc: "Proves the books balance", icon: Scale, color: "text-sky-600 bg-sky-50" },
-          { href: "/reports/profit-loss", label: "Profit & Loss", desc: "Income vs expenses", icon: LineChart, color: "text-emerald-600 bg-emerald-50" },
-          { href: "/reports/balance-sheet", label: "Balance Sheet", desc: "Assets, liabilities, equity", icon: Landmark, color: "text-indigo-600 bg-indigo-50" },
-          { href: "/reports/gst-summary", label: "GST Summary", desc: "Output vs input tax (3B)", icon: Percent, color: "text-rose-600 bg-rose-50" },
+          { href: "/reports/day-book", label: t("report.dayBook"), desc: t("report.dayBookDesc"), icon: BookOpen, color: "text-brand-600 bg-brand-50" },
+          { href: "/reports/ledger", label: t("report.partyLedger"), desc: t("report.partyLedgerDesc"), icon: UsersIcon, color: "text-violet-600 bg-violet-50" },
+          { href: "/reports/outstanding", label: t("report.outstanding"), desc: t("report.outstandingDesc"), icon: Clock, color: "text-amber-600 bg-amber-50" },
+          { href: "/reports/gstr1", label: t("report.gstr1"), desc: t("report.gstr1Desc"), icon: FileJson, color: "text-emerald-600 bg-emerald-50" },
+          { href: "/reports/trial-balance", label: t("report.trialBalance"), desc: t("report.trialBalanceDesc"), icon: Scale, color: "text-sky-600 bg-sky-50" },
+          { href: "/reports/profit-loss", label: t("report.profitLoss"), desc: t("report.profitLossDesc"), icon: LineChart, color: "text-emerald-600 bg-emerald-50" },
+          { href: "/reports/balance-sheet", label: t("report.balanceSheet"), desc: t("report.balanceSheetDesc"), icon: Landmark, color: "text-indigo-600 bg-indigo-50" },
+          { href: "/reports/gst-summary", label: t("report.gstSummary"), desc: t("report.gstSummaryDesc"), icon: Percent, color: "text-rose-600 bg-rose-50" },
+          { href: "/reports/cash-book", label: t("report.cashBook"), desc: t("report.cashBookDesc"), icon: BookOpen, color: "text-teal-600 bg-teal-50" },
+          { href: "/reports/cash-flow", label: t("report.cashFlow"), desc: t("report.cashFlowDesc"), icon: TrendingUp, color: "text-cyan-600 bg-cyan-50" },
         ].map((r) => (
           <Link key={r.href} href={r.href} className="card card-padding card-hover flex items-start gap-3">
             <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${r.color}`}>

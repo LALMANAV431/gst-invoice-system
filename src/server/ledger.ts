@@ -14,11 +14,15 @@ import { db } from "@/lib/db";
 import {
   assertBalanced,
   buildBalanceSheet,
+  buildCashFlow,
   buildProfitAndLoss,
+  classifyCashFlow,
   computeClosing,
+  LEDGER,
   LedgerBalance,
   LedgerNature,
   Posting,
+  PostingLine,
   SYSTEM_GROUPS,
   SYSTEM_LEDGERS,
 } from "@/lib/accounting";
@@ -423,6 +427,299 @@ export async function getLedgerStatement(
     totalDebitPaise: rows.reduce((s, r) => s + r.debitPaise, 0),
     totalCreditPaise: rows.reduce((s, r) => s + r.creditPaise, 0),
   };
+}
+
+/**
+ * Cash & bank book: every movement through cash, bank and UPI ledgers.
+ *
+ * Shows the CONTRA ledger on each row (what the money was for), because a cash
+ * book that only lists amounts is unusable — the user needs to see "Rs 5,000 to
+ * Reliable Suppliers", not "Rs 5,000 out".
+ */
+export async function getCashBook(
+  companyId: string,
+  from: Date,
+  to: Date,
+  ledgerId?: string
+) {
+  // The cash-equivalent ledgers.
+  const cashLedgers = await db.ledger.findMany({
+    where: {
+      companyId,
+      group: { name: { in: ["Cash-in-Hand", "Bank Accounts"] } },
+      ...(ledgerId ? { id: ledgerId } : {}),
+    },
+    select: { id: true, name: true, openingBalancePaise: true, openingIsDebit: true },
+    orderBy: { name: "asc" },
+  });
+
+  if (cashLedgers.length === 0) {
+    return { ledgers: [], openingPaise: 0, rows: [], closingPaise: 0, inflowPaise: 0, outflowPaise: 0 };
+  }
+
+  const ids = cashLedgers.map((l) => l.id);
+
+  // Everything before `from` collapses into the opening balance.
+  const prior = await db.journalEntryLine.aggregate({
+    where: { ledgerId: { in: ids }, entry: { companyId, date: { lt: from } } },
+    _sum: { debitPaise: true, creditPaise: true },
+  });
+
+  const openingFromMasters = cashLedgers.reduce(
+    (sum, l) => sum + (l.openingIsDebit ? l.openingBalancePaise : -l.openingBalancePaise),
+    0
+  );
+  const openingPaise =
+    openingFromMasters + (prior._sum.debitPaise ?? 0) - (prior._sum.creditPaise ?? 0);
+
+  const lines = await db.journalEntryLine.findMany({
+    where: { ledgerId: { in: ids }, entry: { companyId, date: { gte: from, lte: to } } },
+    include: {
+      ledger: { select: { id: true, name: true } },
+      entry: {
+        select: {
+          id: true,
+          date: true,
+          voucherType: true,
+          voucherNo: true,
+          narration: true,
+          sourceType: true,
+          sourceId: true,
+          // The other side of the entry tells the user what the money was for.
+          lines: {
+            select: {
+              debitPaise: true,
+              creditPaise: true,
+              ledger: { select: { id: true, name: true } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ entry: { date: "asc" } }, { id: "asc" }],
+  });
+
+  let running = openingPaise;
+  let inflowPaise = 0;
+  let outflowPaise = 0;
+
+  const rows = lines.map((l) => {
+    running = running + l.debitPaise - l.creditPaise;
+    inflowPaise += l.debitPaise;
+    outflowPaise += l.creditPaise;
+
+    // Name the counterparts: the lines on the opposite side of this one.
+    const isInflow = l.debitPaise > 0;
+    const counterparts = l.entry.lines
+      .filter((other) => !ids.includes(other.ledger.id))
+      .filter((other) => (isInflow ? other.creditPaise > 0 : other.debitPaise > 0))
+      .map((other) => other.ledger.name);
+
+    return {
+      id: l.id,
+      date: l.entry.date,
+      voucherType: l.entry.voucherType,
+      voucherNo: l.entry.voucherNo,
+      accountName: l.ledger.name,
+      particulars:
+        counterparts.length > 0
+          ? counterparts.join(", ")
+          : (l.entry.narration ?? l.entry.voucherType),
+      narration: l.entry.narration,
+      sourceType: l.entry.sourceType,
+      sourceId: l.entry.sourceId,
+      inflowPaise: l.debitPaise,
+      outflowPaise: l.creditPaise,
+      runningPaise: running,
+    };
+  });
+
+  return {
+    ledgers: cashLedgers.map((l) => ({ id: l.id, name: l.name })),
+    openingPaise,
+    rows,
+    closingPaise: running,
+    inflowPaise,
+    outflowPaise,
+  };
+}
+
+/**
+ * Cash flow statement, by the direct method.
+ *
+ * Every movement through a cash or bank ledger is classified by its counterpart,
+ * so the statement can only report movements that actually happened. Deriving it
+ * from profit plus adjustments would be more conventional but also easier to get
+ * silently wrong.
+ */
+export async function getCashFlow(companyId: string, from: Date, to: Date) {
+  const cashLedgers = await db.ledger.findMany({
+    where: { companyId, group: { name: { in: ["Cash-in-Hand", "Bank Accounts"] } } },
+    select: { id: true, openingBalancePaise: true, openingIsDebit: true },
+  });
+
+  const ids = cashLedgers.map((l) => l.id);
+  if (ids.length === 0) return buildCashFlow(0, []);
+
+  const prior = await db.journalEntryLine.aggregate({
+    where: { ledgerId: { in: ids }, entry: { companyId, date: { lt: from } } },
+    _sum: { debitPaise: true, creditPaise: true },
+  });
+
+  const openingFromMasters = cashLedgers.reduce(
+    (sum, l) => sum + (l.openingIsDebit ? l.openingBalancePaise : -l.openingBalancePaise),
+    0
+  );
+  const openingPaise =
+    openingFromMasters + (prior._sum.debitPaise ?? 0) - (prior._sum.creditPaise ?? 0);
+
+  // Entries in the window that touched cash.
+  const entries = await db.journalEntry.findMany({
+    where: {
+      companyId,
+      date: { gte: from, lte: to },
+      lines: { some: { ledgerId: { in: ids } } },
+    },
+    select: {
+      lines: {
+        select: {
+          debitPaise: true,
+          creditPaise: true,
+          ledger: {
+            select: {
+              id: true,
+              name: true,
+              group: { select: { name: true, nature: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const movements: {
+    name: string;
+    amountPaise: number;
+    activity: ReturnType<typeof classifyCashFlow>;
+  }[] = [];
+
+  for (const entry of entries) {
+    // Net cash effect of this entry.
+    const cashDelta = entry.lines
+      .filter((l) => ids.includes(l.ledger.id))
+      .reduce((sum, l) => sum + l.debitPaise - l.creditPaise, 0);
+    if (cashDelta === 0) continue;
+
+    const counterparts = entry.lines.filter((l) => !ids.includes(l.ledger.id));
+    const counterpartTotal = counterparts.reduce(
+      (sum, l) => sum + Math.abs(l.debitPaise - l.creditPaise),
+      0
+    );
+    if (counterpartTotal === 0) continue;
+
+    // Apportion the cash movement across counterparts, so a compound voucher
+    // (e.g. a receipt that also books a discount) is split correctly.
+    for (const c of counterparts) {
+      const weight = Math.abs(c.debitPaise - c.creditPaise);
+      if (weight === 0) continue;
+      movements.push({
+        name: c.ledger.name,
+        amountPaise: Math.round((cashDelta * weight) / counterpartTotal),
+        activity: classifyCashFlow(
+          c.ledger.group.nature as LedgerNature,
+          c.ledger.group.name
+        ),
+      });
+    }
+  }
+
+  return buildCashFlow(openingPaise, movements);
+}
+
+/**
+ * Close a financial year.
+ *
+ * Transfers net profit to Retained Earnings and locks the year. This is what
+ * makes the next year's P&L start from zero while the balance sheet carries
+ * forward.
+ *
+ * Returns the posted entry so the caller can show what happened. Idempotent by
+ * refusing to run twice on an already-closed year.
+ */
+export async function closeFinancialYear(opts: {
+  companyId: string;
+  userId: string;
+  financialYearId: string;
+}): Promise<{ netProfitPaise: number; voucherNo: string }> {
+  return db.$transaction(async (tx) => {
+    const fy = await tx.financialYear.findFirst({
+      where: { id: opts.financialYearId, companyId: opts.companyId },
+    });
+    if (!fy) throw new Error("Financial year not found");
+    if (fy.isClosed) throw new Error(`Financial year ${fy.label} is already closed`);
+
+    // Compute the year's result from movements only — opening balances belong to
+    // the balance sheet, not to this year's profit.
+    const balances = await getLedgerBalances(opts.companyId, {
+      from: fy.startDate,
+      to: fy.endDate,
+      includeOpening: false,
+    });
+    const pl = buildProfitAndLoss(balances);
+
+    if (pl.netProfitPaise === 0 && pl.incomePaise === 0 && pl.expensePaise === 0) {
+      throw new Error(`Financial year ${fy.label} has no entries to close`);
+    }
+
+    // Reverse every income and expense ledger into Retained Earnings, so the new
+    // year starts clean.
+    const lines: PostingLine[] = [];
+    for (const b of balances) {
+      if (b.nature !== "INCOME" && b.nature !== "EXPENSE") continue;
+      if (b.closingPaise === 0) continue;
+      // A net-credit ledger (income) closes with a debit, and vice versa.
+      if (b.closingPaise < 0) {
+        lines.push({ ledger: b.ledgerName, debitPaise: -b.closingPaise });
+      } else {
+        lines.push({ ledger: b.ledgerName, creditPaise: b.closingPaise });
+      }
+    }
+
+    if (pl.netProfitPaise > 0) {
+      lines.push({ ledger: LEDGER.RETAINED_EARNINGS, creditPaise: pl.netProfitPaise });
+    } else if (pl.netProfitPaise < 0) {
+      lines.push({ ledger: LEDGER.RETAINED_EARNINGS, debitPaise: -pl.netProfitPaise });
+    }
+
+    const posting: Posting = {
+      voucherType: "JOURNAL",
+      date: fy.endDate,
+      narration: `Year-end closing for ${fy.label}: net ${pl.netProfitPaise >= 0 ? "profit" : "loss"} transferred to Retained Earnings`,
+      sourceType: "FinancialYear",
+      sourceId: fy.id,
+      lines,
+    };
+
+    const company = await tx.company.findUnique({
+      where: { id: opts.companyId },
+      select: { journalPrefix: true },
+    });
+
+    const { voucherNo } = await postJournalEntry(tx, {
+      companyId: opts.companyId,
+      userId: opts.userId,
+      posting,
+      journalPrefix: company?.journalPrefix ?? "JV",
+    });
+
+    // Lock the year so the figures behind the closing cannot change.
+    await tx.financialYear.update({
+      where: { id: fy.id },
+      data: { isClosed: true, lockedTill: fy.endDate },
+    });
+
+    return { netProfitPaise: pl.netProfitPaise, voucherNo };
+  });
 }
 
 /**

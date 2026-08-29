@@ -311,6 +311,46 @@ export type InvoicePostingInput = {
 };
 
 /**
+ * Build a cash flow statement from classified movements.
+ *
+ * `movements` are the non-cash sides of every entry that touched cash or bank,
+ * already classified. Grouping happens here so the query stays simple.
+ */
+export function buildCashFlow(
+  openingPaise: Paise,
+  movements: { name: string; amountPaise: Paise; activity: CashFlowActivity }[]
+): CashFlowStatement {
+  const byName = new Map<string, { amountPaise: Paise; activity: CashFlowActivity }>();
+
+  for (const m of movements) {
+    const existing = byName.get(m.name);
+    if (existing) existing.amountPaise += m.amountPaise;
+    else byName.set(m.name, { amountPaise: m.amountPaise, activity: m.activity });
+  }
+
+  const lines = [...byName.entries()]
+    .map(([name, v]) => ({ name, amountPaise: v.amountPaise, activity: v.activity }))
+    .filter((l) => l.amountPaise !== 0)
+    .sort((a, b) => Math.abs(b.amountPaise) - Math.abs(a.amountPaise));
+
+  const sumOf = (activity: CashFlowActivity) =>
+    lines.filter((l) => l.activity === activity).reduce((s, l) => s + l.amountPaise, 0);
+
+  const operatingPaise = sumOf("OPERATING");
+  const investingPaise = sumOf("INVESTING");
+  const financingPaise = sumOf("FINANCING");
+
+  return {
+    openingPaise,
+    operatingPaise,
+    investingPaise,
+    financingPaise,
+    closingPaise: openingPaise + operatingPaise + investingPaise + financingPaise,
+    lines,
+  };
+}
+
+/**
  * Sales invoice.
  *
  *   Dr Customer                  grand total (less TDS)
@@ -689,6 +729,49 @@ export function buildProfitAndLoss(balances: LedgerBalance[]): ProfitAndLoss {
     incomeLines,
     expenseLines,
   };
+}
+
+export type CashFlowStatement = {
+  openingPaise: Paise;
+  closingPaise: Paise;
+  /** Trading activity: sales receipts, supplier payments, expenses. */
+  operatingPaise: Paise;
+  /** Fixed assets bought or sold. */
+  investingPaise: Paise;
+  /** Capital introduced or withdrawn, loans raised or repaid. */
+  financingPaise: Paise;
+  lines: { name: string; amountPaise: Paise; activity: CashFlowActivity }[];
+};
+
+export type CashFlowActivity = "OPERATING" | "INVESTING" | "FINANCING";
+
+/**
+ * Classify the counterpart of a cash movement into a cash-flow activity.
+ *
+ * This is the direct method: every movement through a cash or bank ledger is
+ * classified by what it was paired with. That is more honest than deriving cash
+ * flow from profit adjustments, because it can only report movements that
+ * actually happened.
+ *
+ * Classification is by the counterpart ledger's GROUP, not its name, so a
+ * user-created ledger lands in the right activity automatically.
+ */
+export function classifyCashFlow(
+  counterpartNature: LedgerNature,
+  counterpartGroup: string
+): CashFlowActivity {
+  // Fixed assets and long-term loans are the two things that are not trading.
+  if (counterpartGroup === "Fixed Assets") return "INVESTING";
+  if (
+    counterpartGroup === "Capital Account" ||
+    counterpartGroup === "Reserves & Surplus" ||
+    counterpartGroup === "Loans (Liability)"
+  ) {
+    return "FINANCING";
+  }
+  if (counterpartNature === "EQUITY") return "FINANCING";
+  // Everything else — debtors, creditors, income, expenses, taxes — is trading.
+  return "OPERATING";
 }
 
 export type BalanceSheet = {
