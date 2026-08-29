@@ -9,6 +9,16 @@ dist
 .env*.local
 prisma/dev.db
 prisma/dev.db-journal
+# Any SQLite database, wherever it is created. DATABASE_URL="file:./dev.db"
+# resolves relative to the prisma/ directory for CLI commands but to the project
+# root at runtime, so both locations can appear.
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Test/coverage output
+coverage
 .DS_Store
 .vscode
 .idea
