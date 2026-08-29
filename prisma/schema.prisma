@@ -131,6 +131,9 @@ model Company {
   financialYears FinancialYear[]
   aiUsageLogs    AiUsageLog[]
   orderDocuments OrderDocument[]
+  paymentLinks   PaymentLink[]
+  subscription   Subscription?
+  billingInvoices BillingInvoice[]
 }
 
 model Party {
@@ -250,6 +253,7 @@ model Invoice {
 
   items    InvoiceItem[]
   payments Payment[]
+  paymentLinks PaymentLink[]
 
   @@unique([companyId, number])
   @@index([companyId, date])
@@ -924,6 +928,141 @@ model JournalEntryLine {
   @@index([ledgerId])
 }
 
+
+// ======================== PAYMENTS & BILLING ========================
+//
+// A payment link a customer can pay online, which then records a receipt against
+// the invoice automatically.
+model PaymentLink {
+  id     String @id @default(cuid())
+  // Short, unguessable public token used in the URL. NOT the row id, so the
+  // internal id is never exposed and links cannot be enumerated by counting.
+  token  String @unique
+  // PENDING | PAID | EXPIRED | CANCELLED
+  status String @default("PENDING")
+
+  amountPaise Int
+  // Set once paid, so a partial gateway settlement is visible rather than
+  // silently treated as full payment.
+  paidPaise   Int @default(0)
+
+  provider          String  @default("mock") // mock | razorpay | stripe
+  providerOrderId   String?
+  providerPaymentId String?
+
+  expiresAt DateTime?
+  paidAt    DateTime?
+  // The receipt created when payment landed, so the link and the books agree.
+  paymentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([invoiceId])
+}
+
+// Gateway webhook deliveries.
+//
+// EXISTS FOR IDEMPOTENCY. Gateways retry until they get a 2xx, and they can
+// deliver the same event more than once even after success. Without a record of
+// what has been processed, a retry would record the same customer payment twice.
+// The unique constraint on (provider, eventId) is the guard.
+model WebhookEvent {
+  id         String @id @default(cuid())
+  provider   String
+  // The gateway's own event id.
+  eventId    String
+  eventType  String
+  // PROCESSED | IGNORED | FAILED
+  status     String @default("PROCESSED")
+  // Raw payload, retained for dispute investigation.
+  payload    String
+  error      String?
+  receivedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([provider, eventType, receivedAt])
+}
+
+// A tenant's subscription to a plan.
+model Subscription {
+  id     String @id @default(cuid())
+  planId String // FREE | BASIC | PREMIUM
+  // TRIALING | ACTIVE | PAST_DUE | CANCELLED | EXPIRED
+  status String @default("TRIALING")
+  // MONTHLY | ANNUAL
+  interval String @default("MONTHLY")
+
+  amountPaise Int @default(0)
+  // GST is chargeable on SaaS subscriptions, so it is stored rather than
+  // recomputed at display time.
+  taxPaise    Int @default(0)
+  totalPaise  Int @default(0)
+
+  couponCode      String?
+  discountPaise   Int     @default(0)
+
+  provider               String? // razorpay | stripe | mock
+  providerSubscriptionId String?
+  providerCustomerId     String?
+
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelledAt        DateTime?
+  // Number of consecutive failed charges, used to drive dunning.
+  failedAttempts     Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  billingInvoices BillingInvoice[]
+
+  @@index([status])
+}
+
+// Our own invoice to the tenant for their subscription. Distinct from `Invoice`,
+// which is the tenant's invoice to THEIR customer.
+model BillingInvoice {
+  id     String @id @default(cuid())
+  number String @unique
+  // DRAFT | PAID | UNPAID | FAILED | REFUNDED
+  status String @default("UNPAID")
+
+  amountPaise   Int
+  taxPaise      Int @default(0)
+  totalPaise    Int
+  gstRate       Float @default(18)
+  // Place of supply drives whether we charge CGST+SGST or IGST on our own bill.
+  placeOfSupply String?
+
+  periodStart DateTime
+  periodEnd   DateTime
+  paidAt      DateTime?
+
+  provider          String?
+  providerPaymentId String?
+  failureReason     String?
+
+  createdAt DateTime @default(now())
+
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([status])
+}
 
 // ======================== AI USAGE METERING ========================
 //

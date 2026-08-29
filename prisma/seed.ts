@@ -149,6 +149,17 @@ async function main() {
   const fyShort = fyLabel.slice(2);
 
   // Wipe & re-seed. Children before parents for FK safety.
+  //
+  // Every table with a foreign key to Party, Item, Invoice, Godown or Company
+  // must be cleared here. Forgetting one makes the wipe fail with an opaque
+  // P2003 — which is exactly what happened when OrderDocument and PaymentLink
+  // were added and this list was not updated.
+  await prisma.paymentLink.deleteMany();
+  await prisma.billingInvoice.deleteMany();
+  await prisma.subscription.deleteMany();
+  await prisma.webhookEvent.deleteMany();
+  await prisma.orderDocumentItem.deleteMany();
+  await prisma.orderDocument.deleteMany();
   await prisma.journalEntryLine.deleteMany();
   await prisma.journalEntry.deleteMany();
   await prisma.ledger.deleteMany();
