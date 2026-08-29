@@ -13,6 +13,7 @@ import {
 } from "@/server/ledger";
 import { buildCreditNotePosting } from "@/lib/accounting";
 import { parsePagination, paginated } from "@/lib/pagination";
+import { estimateCostRate, recordStockMovement } from "@/server/stock";
 
 const lineSchema = z.object({
   itemId: z.string().nullish(),
@@ -144,25 +145,24 @@ export async function POST(req: Request) {
       const movementType = noteKind === "CREDIT" ? "IN" : "OUT";
       for (const line of lines) {
         if (!line.itemId) continue;
-        await tx.item.update({
-          where: { id: line.itemId },
-          data: {
-            currentStock:
-              movementType === "IN"
-                ? { increment: line.quantity }
-                : { decrement: line.quantity },
-          },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: company.id,
-            itemId: line.itemId,
-            type: movementType,
-            quantity: line.quantity,
-            reference: number,
-            notes: `${noteKind === "CREDIT" ? "Sales return" : "Purchase return"}: ${number}`,
-            date,
-          },
+        // A sales return comes back at COST, not at the price we credited: a
+        // credit note states what the customer is owed, which includes our
+        // margin. A purchase return leaves at cost, which the engine derives.
+        const ratePaise =
+          movementType === "IN"
+            ? await estimateCostRate(tx, company.id, line.itemId)
+            : undefined;
+        await recordStockMovement(tx, {
+          companyId: company.id,
+          itemId: line.itemId,
+          direction: movementType,
+          quantity: line.quantity,
+          date,
+          reference: number,
+          notes: `${noteKind === "CREDIT" ? "Sales return" : "Purchase return"}: ${number}`,
+          sourceType: noteKind === "CREDIT" ? "SALES_RETURN" : "PURCHASE_RETURN",
+          sourceId: created.id,
+          ratePaise,
         });
       }
 

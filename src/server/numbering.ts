@@ -41,7 +41,9 @@ export type DocumentType =
   | "SALES_ORDER"
   | "DELIVERY_CHALLAN"
   | "PURCHASE_ORDER"
-  | "GRN";
+  | "GRN"
+  | "ADJUSTMENT"
+  | "STOCK_COUNT";
 
 /** A Prisma client or an interactive transaction client. */
 type Client = Prisma.TransactionClient | typeof db;

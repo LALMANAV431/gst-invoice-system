@@ -277,6 +277,41 @@ POST /api/ai/categorise                Suggest an expense head
 GET  /api/ai/usage                     Token spend against the tenant's budget
 ```
 
+**Inventory** — see `docs/INVENTORY_VALUATION.md` for the costing rules.
+
+```
+GET  /api/reports/inventory                    Closing stock + COGS per item, with flags
+GET  /api/reports/inventory?view=ageing        Age buckets (0-30/31-60/61-90/91-180/180+)
+GET  /api/reports/inventory?view=dead          Items holding stock that is not moving
+GET  /api/reports/inventory?view=expiry        Batches expired or nearing expiry
+GET  /api/reports/inventory?view=ledger&itemId=   Movement history with running cost
+
+GET  /api/stock-adjustments                    Paginated, plus the reason catalogue
+POST /api/stock-adjustments                    Reason fixes the direction, not the request
+
+GET  /api/physical-counts                      Paginated, with a variance-line count
+POST /api/physical-counts                      Freezes the book quantity onto every line
+GET  /api/physical-counts/:id                  Sheet + summary of the effect of posting
+PATCH /api/physical-counts/:id                 Record counted quantities (DRAFT only)
+POST /api/physical-counts/:id/post             Variances -> one stock adjustment
+DELETE /api/physical-counts/:id                Cancels a draft; refuses a posted sheet
+
+GET  /api/batches                              ?itemId= &inStock=true
+POST /api/batches                              Batch/lot with mfg + expiry dates
+```
+
+Notes:
+
+- All money is integer paise. Quantities are floats, because real units are
+  fractional (2.5 kg).
+- `PUT /api/company` returns `409 VALUATION_RESTATEMENT` if `stockValuationMethod`
+  changes without `acknowledgeRestatement: true`. Valuation is derived, so a
+  change restates every past period.
+- Adjustments and counts change quantities only; they never post to the ledger.
+  Purchases are already expensed on receipt (periodic inventory).
+
+---
+
 ---
 
 ## Conventions for new endpoints

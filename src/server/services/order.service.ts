@@ -23,6 +23,7 @@ import { db } from "@/lib/db";
 import { computeDocument, type RawLineInput } from "./document.service";
 import { allocateDocumentNumber, assertPeriodOpen, type DocumentType } from "../numbering";
 import { ValidationError } from "./invoice.service";
+import { estimateCostRate, purchaseCostPaise, recordStockMovement } from "../stock";
 
 export type OrderDocType =
   | "SALES_ORDER"
@@ -258,23 +259,22 @@ export async function createOrderDocument(input: CreateOrderInput) {
     if (config.stockEffect !== "NONE") {
       for (const line of lines) {
         if (!line.itemId) continue;
-        await tx.item.update({
-          where: { id: line.itemId },
-          data:
-            config.stockEffect === "IN"
-              ? { currentStock: { increment: line.quantity } }
-              : { currentStock: { decrement: line.quantity } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: input.companyId,
-            itemId: line.itemId,
-            type: config.stockEffect,
-            quantity: line.quantity,
-            reference: number,
-            notes: `${config.label}: ${number}`,
-            date,
-          },
+        // A GRN receives goods, so it carries their cost. A delivery challan
+        // issues them and the valuation engine decides what they cost.
+        const costPaise =
+          config.stockEffect === "IN" ? purchaseCostPaise(line, company.gstScheme) : undefined;
+        await recordStockMovement(tx, {
+          companyId: input.companyId,
+          itemId: line.itemId,
+          direction: config.stockEffect === "IN" ? "IN" : "OUT",
+          quantity: line.quantity,
+          date,
+          reference: number,
+          notes: `${config.label}: ${number}`,
+          sourceType: input.docType === "GRN" ? "GRN" : "DELIVERY_CHALLAN",
+          sourceId: created.id,
+          godownId: input.godownId ?? null,
+          valuePaise: costPaise,
         });
       }
     }
@@ -375,22 +375,20 @@ export async function cancelOrderDocument(
     if (config && config.stockEffect !== "NONE") {
       for (const line of doc.items) {
         if (!line.itemId) continue;
-        await tx.item.update({
-          where: { id: line.itemId },
-          data:
-            config.stockEffect === "IN"
-              ? { currentStock: { decrement: line.quantity } }
-              : { currentStock: { increment: line.quantity } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId,
-            itemId: line.itemId,
-            type: config.stockEffect === "IN" ? "OUT" : "IN",
-            quantity: line.quantity,
-            reference: doc.number,
-            notes: `${config.label} cancelled: ${doc.number}`,
-          },
+        const reversing = config.stockEffect === "IN" ? "OUT" : "IN";
+        const ratePaise =
+          reversing === "IN" ? await estimateCostRate(tx, companyId, line.itemId) : undefined;
+        await recordStockMovement(tx, {
+          companyId,
+          itemId: line.itemId,
+          direction: reversing,
+          quantity: line.quantity,
+          reference: doc.number,
+          notes: `${config.label} cancelled: ${doc.number}`,
+          sourceType: doc.docType === "GRN" ? "PURCHASE_RETURN" : "SALES_RETURN",
+          sourceId: doc.id,
+          godownId: doc.godownId,
+          ratePaise,
         });
       }
     }

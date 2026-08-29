@@ -143,6 +143,9 @@ async function main() {
   // sits inside the current FY no matter when the seed is run.
   const today = new Date();
   const daysAgo = (n: number) => new Date(today.getTime() - n * 86400000);
+  // Opening stock must predate every transaction, or a sale dated earlier than
+  // the opening receipt would be costed as a negative-stock issue.
+  const openingDate = daysAgo(120);
   const fyStartYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
   const fyLabel = `${fyStartYear}-${String((fyStartYear + 1) % 100).padStart(2, "0")}`;
   // "2026-27" -> "26-27", matching formatDocumentNumber().
@@ -173,6 +176,13 @@ async function main() {
   await prisma.financialYear.deleteMany();
   await prisma.aiUsageLog.deleteMany();
   await prisma.stockMovement.deleteMany();
+  // Inventory documents reference items and batches, and stockMovement
+  // references batch, so these must be wiped after movements and before items.
+  await prisma.stockAdjustmentItem.deleteMany();
+  await prisma.stockAdjustment.deleteMany();
+  await prisma.physicalCountItem.deleteMany();
+  await prisma.physicalCount.deleteMany();
+  await prisma.batch.deleteMany();
   await prisma.stockTransfer.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.invoiceItem.deleteMany();
@@ -310,6 +320,13 @@ async function main() {
     // Deliberately below its reorder level so the low-stock reminder is
     // demonstrable. A feature that cannot be seen with demo data looks broken.
     { name: "Screen Guard (universal)", hsn: "3919", unit: "NOS", sale: 149, purchase: 45, gstRate: 18, stock: 3, lowStock: 25 },
+    // Never sold and taken on long ago, so the dead-stock report has something
+    // to find. Its opening cost is deliberately HIGHER than its current sale
+    // price, which also exercises the AS 2 "lower of cost and net realisable
+    // value" flag.
+    { name: "Tablet Stylus (old model)", hsn: "8471", unit: "NOS", sale: 299, purchase: 260, gstRate: 18, stock: 18, openingRate: 340 },
+    // Batch-tracked, to exercise expiry reporting.
+    { name: "Screen Cleaning Gel 50ml", hsn: "3402", unit: "NOS", sale: 120, purchase: 62, gstRate: 18, stock: 0, trackBatches: true },
   ];
 
   const items: { id: string; name: string; hsn: string; unit: string; salePricePaise: number; purchasePricePaise: number; gstRate: number; cessRate: number; supplyType: string }[] = [];
@@ -326,10 +343,37 @@ async function main() {
         cessRate: it.cessRate ?? 0,
         supplyType: it.supplyType ?? "TAXABLE",
         openingStock: it.stock,
+        // Cost of the opening stock, held apart from the current purchase price
+        // so that re-pricing an item cannot retrospectively revalue stock we
+        // already had.
+        openingRatePaise: toPaise(it.openingRate ?? it.purchase),
         currentStock: it.stock,
         lowStockAlert: it.lowStock ?? 10,
+        trackBatches: it.trackBatches ?? false,
       },
     });
+
+    // Opening stock gets a real movement, so the stock ledger is the complete
+    // history and `sum(IN) - sum(OUT)` equals currentStock for every item. The
+    // inventory report surfaces any drift, so seeding without this would show
+    // the whole catalogue as broken.
+    if (it.stock > 0) {
+      await prisma.stockMovement.create({
+        data: {
+          companyId: company.id,
+          itemId: created.id,
+          type: "IN",
+          quantity: it.stock,
+          date: openingDate,
+          reference: "Opening",
+          notes: "Opening stock",
+          sourceType: "OPENING",
+          ratePaise: toPaise(it.openingRate ?? it.purchase),
+          valuePaise: toPaise((it.openingRate ?? it.purchase) * it.stock),
+        },
+      });
+    }
+
     items.push(created as never);
   }
 
@@ -424,6 +468,10 @@ async function main() {
           reference: number,
           notes: `Sale: ${number}`,
           date: opts.date,
+          sourceType: "SALE",
+          sourceId: invoice.id,
+          // No cost on an issue: the valuation engine decides what it cost.
+          // Storing the sale price here would let a report read revenue as cost.
         },
       });
     }
@@ -600,11 +648,15 @@ async function main() {
       },
     });
 
-    for (const l of purchaseLines) {
+    for (let li = 0; li < purchaseLines.length; li++) {
+      const l = purchaseLines[li];
       await prisma.item.update({
         where: { id: l.item.id },
         data: { currentStock: { increment: l.qty } },
       });
+      // Cost of inventory is the taxable value net of discount. GST is excluded
+      // because a regular dealer recovers it as input credit.
+      const costPaise = gst.lines[li].taxablePaise;
       await prisma.stockMovement.create({
         data: {
           companyId: company.id,
@@ -614,6 +666,10 @@ async function main() {
           reference: number,
           notes: `Purchase: ${number}`,
           date,
+          sourceType: "PURCHASE",
+          sourceId: purchase.id,
+          ratePaise: Math.round(costPaise / l.qty),
+          valuePaise: costPaise,
         },
       });
     }
@@ -705,6 +761,332 @@ async function main() {
       { code: "FLAT100", description: "Flat Rs 100 off", type: "FLAT", flatOffPaise: toPaise(100), appliesToPlan: "BASIC", active: true },
     ],
   });
+
+  // ---- A second purchase at a HIGHER price ------------------------------
+  //
+  // Without price variation FIFO and weighted average produce identical
+  // figures, which makes the whole valuation feature look like it does nothing.
+  // Real prices move, so the demo data must move too. Verification compares the
+  // two methods and fails if they agree.
+  {
+    const item = byName("Boat Headphones 250");
+    const qty = 20;
+    // Was 950 at opening and on the first purchase; now 1,120.
+    const newRate = 1120;
+    const gst = computeGstInvoice({
+      supplierStateCode: company.stateCode,
+      placeOfSupplyStateCode: vendor.stateCode,
+      lines: [{ quantity: qty, rate: newRate, gstRate: item.gstRate }],
+      roundToNearestRupee: true,
+    });
+
+    const number = `PUR/${fyShort}/0002`;
+    const date = daysAgo(6);
+    const purchase = await prisma.purchase.create({
+      data: {
+        companyId: company.id,
+        partyId: vendor.id,
+        number,
+        vendorBillNo: "RS/2025/9042",
+        date,
+        status: "UNPAID",
+        itcEligible: true,
+        subTotalPaise: gst.taxablePaise,
+        cgstTotalPaise: gst.cgstPaise,
+        sgstTotalPaise: gst.sgstPaise,
+        igstTotalPaise: gst.igstPaise,
+        cessTotalPaise: gst.cessPaise,
+        taxTotalPaise: gst.taxPaise,
+        roundOffPaise: gst.roundOffPaise,
+        grandTotalPaise: gst.grandTotalPaise,
+        isInterState: gst.isInterState,
+        placeOfSupply: vendor.stateCode,
+        items: {
+          create: [
+            {
+              itemId: item.id,
+              itemName: item.name,
+              hsn: item.hsn,
+              quantity: qty,
+              unit: item.unit,
+              ratePaise: gst.lines[0].ratePaise,
+              taxablePaise: gst.lines[0].taxablePaise,
+              gstRate: gst.lines[0].gstRate,
+              cgstPaise: gst.lines[0].cgstPaise,
+              sgstPaise: gst.lines[0].sgstPaise,
+              igstPaise: gst.lines[0].igstPaise,
+              cessPaise: gst.lines[0].cessPaise,
+              totalPaise: gst.lines[0].totalPaise,
+            },
+          ],
+        },
+      },
+    });
+
+    await prisma.item.update({
+      where: { id: item.id },
+      data: { currentStock: { increment: qty } },
+    });
+    await prisma.stockMovement.create({
+      data: {
+        companyId: company.id,
+        itemId: item.id,
+        type: "IN",
+        quantity: qty,
+        reference: number,
+        notes: `Purchase: ${number}`,
+        date,
+        sourceType: "PURCHASE",
+        sourceId: purchase.id,
+        ratePaise: Math.round(gst.lines[0].taxablePaise / qty),
+        valuePaise: gst.lines[0].taxablePaise,
+      },
+    });
+
+    await postEntry(
+      company.id,
+      user.id,
+      buildPurchasePosting({
+        partyLedger: vendor.name,
+        date,
+        number,
+        purchaseId: purchase.id,
+        taxablePaise: gst.taxablePaise,
+        cgstPaise: gst.cgstPaise,
+        sgstPaise: gst.sgstPaise,
+        igstPaise: gst.igstPaise,
+        cessPaise: gst.cessPaise,
+        additionalChargesPaise: 0,
+        roundOffPaise: gst.roundOffPaise,
+        grandTotalPaise: gst.grandTotalPaise,
+        itcEligible: true,
+      }),
+      number
+    );
+
+    // A sale AFTER the price rise, so the two methods assign different costs to
+    // it: FIFO uses the old 950 lots, weighted average blends in the 1,120.
+    await createDemoInvoice({
+      party: customer,
+      lines: [{ item, qty: 6 }],
+      date: daysAgo(4),
+    });
+  }
+
+  // ---- Inventory: batches, a write-off and a posted stock count ---------
+  //
+  // Each of these exists so a report has something real to show. A batch that
+  // never expires, a valuation with no adjustments and a count sheet nobody
+  // posted would all leave the inventory screens looking broken.
+  {
+    const gel = byName("Screen Cleaning Gel 50ml");
+
+    // Two batches of the same item, one already expired and one expiring soon,
+    // received on a costed movement each so they carry a real value.
+    const batchSpecs = [
+      { batchNo: "SCG-2405", mfgDays: 400, expiryDays: -20, qty: 12, rate: 60 },
+      { batchNo: "SCG-2512", mfgDays: 90, expiryDays: 25, qty: 30, rate: 62 },
+      { batchNo: "SCG-2604", mfgDays: 30, expiryDays: 300, qty: 40, rate: 64 },
+    ];
+    for (const b of batchSpecs) {
+      const batch = await prisma.batch.create({
+        data: {
+          companyId: company.id,
+          itemId: gel.id,
+          batchNo: b.batchNo,
+          mfgDate: daysAgo(b.mfgDays),
+          // Negative days means the expiry is in the future.
+          expiryDate: daysAgo(-b.expiryDays),
+          quantity: b.qty,
+        },
+      });
+      await prisma.stockMovement.create({
+        data: {
+          companyId: company.id,
+          itemId: gel.id,
+          batchId: batch.id,
+          type: "IN",
+          quantity: b.qty,
+          date: daysAgo(b.mfgDays - 5),
+          reference: `Batch ${b.batchNo}`,
+          notes: `Received batch ${b.batchNo}`,
+          sourceType: "PURCHASE",
+          ratePaise: toPaise(b.rate),
+          valuePaise: toPaise(b.rate * b.qty),
+        },
+      });
+      await prisma.item.update({
+        where: { id: gel.id },
+        data: { currentStock: { increment: b.qty } },
+      });
+    }
+
+    // A damage write-off, through the same document type the UI creates.
+    const cable = byName("USB-C Cable 1m");
+    const damageDate = daysAgo(15);
+    const damageRate = cable.purchasePricePaise;
+    const damageQty = 6;
+    const damage = await prisma.stockAdjustment.create({
+      data: {
+        companyId: company.id,
+        number: `ADJ/${fyShort}/0001`,
+        date: damageDate,
+        reason: "DAMAGE",
+        notes: "Water damage in transit, carton 3",
+        items: {
+          create: [
+            {
+              itemId: cable.id,
+              quantity: damageQty,
+              direction: "OUT",
+              ratePaise: damageRate,
+              valuePaise: damageRate * damageQty,
+              notes: "Crushed connectors",
+            },
+          ],
+        },
+      },
+    });
+    await prisma.stockMovement.create({
+      data: {
+        companyId: company.id,
+        itemId: cable.id,
+        type: "OUT",
+        quantity: damageQty,
+        date: damageDate,
+        reference: damage.number,
+        notes: `DAMAGE: ${damage.number}`,
+        sourceType: "ADJUSTMENT",
+        sourceId: damage.id,
+      },
+    });
+    await prisma.item.update({
+      where: { id: cable.id },
+      data: { currentStock: { decrement: damageQty } },
+    });
+
+    // A posted physical count that found one shortage, so the count screens and
+    // the resulting adjustment both have history.
+    const countDate = daysAgo(10);
+    const counted = byName("Boat Headphones 250");
+    const systemQty = (await prisma.item.findUniqueOrThrow({
+      where: { id: counted.id },
+      select: { currentStock: true },
+    })).currentStock;
+    const shortage = 2;
+    const countRate = counted.purchasePricePaise;
+
+    const count = await prisma.physicalCount.create({
+      data: {
+        companyId: company.id,
+        number: `PC/${fyShort}/0001`,
+        date: countDate,
+        status: "POSTED",
+        postedAt: countDate,
+        countedBy: "Demo User",
+        notes: "Monthly count, shelf B",
+        items: {
+          create: [
+            {
+              itemId: counted.id,
+              systemQuantity: systemQty,
+              countedQuantity: systemQty - shortage,
+              variance: -shortage,
+              ratePaise: countRate,
+              notes: "Two units missing from shelf B",
+            },
+          ],
+        },
+      },
+    });
+
+    const countAdj = await prisma.stockAdjustment.create({
+      data: {
+        companyId: company.id,
+        number: `ADJ/${fyShort}/0002`,
+        date: countDate,
+        reason: "SHORTAGE",
+        notes: `Physical count ${count.number}`,
+        physicalCountId: count.id,
+        items: {
+          create: [
+            {
+              itemId: counted.id,
+              quantity: shortage,
+              direction: "OUT",
+              ratePaise: countRate,
+              valuePaise: countRate * shortage,
+            },
+          ],
+        },
+      },
+    });
+    await prisma.stockMovement.create({
+      data: {
+        companyId: company.id,
+        itemId: counted.id,
+        type: "OUT",
+        quantity: shortage,
+        date: countDate,
+        reference: countAdj.number,
+        notes: `SHORTAGE: ${countAdj.number}`,
+        sourceType: "COUNT",
+        sourceId: countAdj.id,
+      },
+    });
+    await prisma.item.update({
+      where: { id: counted.id },
+      data: { currentStock: { decrement: shortage } },
+    });
+
+    // Counters must know these numbers exist, or the first adjustment created
+    // through the UI would restart at 0001 and collide.
+    for (const [documentType, prefix, last] of [
+      ["ADJUSTMENT", "ADJ", 2],
+      ["STOCK_COUNT", "PC", 1],
+    ] as const) {
+      await prisma.documentCounter.create({
+        data: {
+          companyId: company.id,
+          documentType,
+          financialYear: fyLabel,
+          prefix,
+          lastNumber: last,
+        },
+      });
+    }
+  }
+
+  // ---- Verify stock quantities agree with the stock ledger ---------------
+  //
+  // Every quantity change must leave a movement. If this ever fails, some code
+  // path changed stock silently and inventory valuation would be wrong in a way
+  // that is hard to spot by eye.
+  {
+    const allItems = await prisma.item.findMany({
+      where: { companyId: company.id },
+      select: { id: true, name: true, currentStock: true },
+    });
+    for (const item of allItems) {
+      const [ins, outs] = await Promise.all([
+        prisma.stockMovement.aggregate({
+          where: { companyId: company.id, itemId: item.id, type: "IN" },
+          _sum: { quantity: true },
+        }),
+        prisma.stockMovement.aggregate({
+          where: { companyId: company.id, itemId: item.id, type: "OUT" },
+          _sum: { quantity: true },
+        }),
+      ]);
+      const ledgerBalance = (ins._sum.quantity ?? 0) - (outs._sum.quantity ?? 0);
+      if (Math.abs(ledgerBalance - item.currentStock) > 1e-6) {
+        throw new Error(
+          `Seed produced stock drift for "${item.name}": currentStock ${item.currentStock} ` +
+            `but the movement ledger implies ${ledgerBalance}`
+        );
+      }
+    }
+  }
 
   // ---- Verify the seeded books actually balance -------------------------
   const lines = await prisma.journalEntryLine.aggregate({

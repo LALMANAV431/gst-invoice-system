@@ -337,6 +337,77 @@ Required to enforce per-tenant budgets and to know whether AI features are profi
 
 ---
 
+## Inventory models
+
+Added so that stock can be valued properly rather than estimated from the current
+purchase price. Full rules in `docs/INVENTORY_VALUATION.md`.
+
+### `StockMovement` (extended)
+
+The stock ledger, and the single source of truth for inventory value. Every
+quantity change in the system writes one row, through
+`recordStockMovement()` in `src/server/stock.ts`.
+
+New columns:
+
+| Column | Purpose |
+|---|---|
+| `valuePaise` | Total cost of a receipt. Authoritative for `IN`; stays `0` on `OUT` because the valuation engine derives issue cost. |
+| `ratePaise` | Per-unit cost, for display |
+| `sourceType` | `OPENING` \| `PURCHASE` \| `SALE` \| `GRN` \| `ADJUSTMENT` \| `COUNT` \| `TRANSFER` \| `SALES_RETURN` \| `PURCHASE_RETURN` \| `DELIVERY_CHALLAN` |
+| `sourceId` | Id of the causing document, so a movement traces back |
+| `godownId`, `batchId` | Location and lot |
+
+```prisma
+// Valuation replays movements in date order for ONE item. Without this it is a
+// full scan of the company's entire stock history per item.
+@@index([companyId, itemId, date])
+@@index([companyId, sourceType, sourceId])
+```
+
+### `Batch`
+
+A lot of an item, for goods where shelf life or traceability matters.
+`@@unique([itemId, batchNo])` — a batch number identifies goods within one item,
+not across the company. Quantity is maintained by movements; it is never set
+directly, because that would be a stock change with no movement behind it.
+
+### `StockAdjustment` / `StockAdjustmentItem`
+
+Quantity changes that no invoice or purchase explains. `reason` fixes the
+direction; `direction` is copied onto each line so a row is self-describing.
+`physicalCountId` (`@unique`) is set when the adjustment came from posting a
+count — the only route by which count variances reach stock.
+
+**These never post to the ledger.** The books use periodic inventory, so written-off
+goods have already been charged to `Purchases`; a second entry would double-count.
+
+### `PhysicalCount` / `PhysicalCountItem`
+
+`systemQuantity` is a **frozen snapshot** of the book position when the sheet was
+created. Recomputing it at posting time would absorb the day's trading into the
+variance and erase the thing the count exists to find. `countedQuantity` is
+pre-filled with it so an untouched sheet posts nothing.
+
+### `Item` and `Company` additions
+
+| Column | Why |
+|---|---|
+| `Item.openingRatePaise` | Cost of the opening stock, held apart from `purchasePricePaise` so re-pricing an item cannot retrospectively revalue stock already held |
+| `Item.trackBatches` | Opt into batch/expiry tracking |
+| `Company.stockValuationMethod` | `FIFO` \| `WEIGHTED_AVERAGE`. On the company, not the item: AS 2 requires the choice to be applied consistently. |
+| `Company.deadStockDays` | Idle threshold for the dead-stock report |
+| `Company.adjustmentPrefix`, `stockCountPrefix` | Document numbering |
+
+### The drift invariant
+
+`sum(IN) - sum(OUT) === Item.currentStock`, for every item. `prisma/seed.ts`
+asserts it and fails loudly, and the valuation report exposes
+`ledgerDriftQuantity` per item, so a code path that changes stock without
+recording a movement is caught rather than left to distort valuations quietly.
+
+---
+
 ## Seed data
 
 `prisma/seed.ts` creates a demo company with customers, suppliers, products, invoices and

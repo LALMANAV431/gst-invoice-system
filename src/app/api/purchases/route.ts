@@ -13,6 +13,7 @@ import {
 } from "@/server/ledger";
 import { buildPurchasePosting } from "@/lib/accounting";
 import { parsePagination, paginated } from "@/lib/pagination";
+import { purchaseCostPaise, recordStockMovement } from "@/server/stock";
 
 const lineSchema = z.object({
   itemId: z.string().nullish(),
@@ -136,23 +137,25 @@ export async function POST(req: Request) {
         include: { items: true },
       });
 
-      // Stock in.
+      // Stock in, carrying the cost so inventory can be valued properly. Cost
+      // is the taxable value net of discount; GST is excluded because a regular
+      // dealer recovers it as input credit (purchaseCostPaise adds it back for a
+      // composition dealer, who cannot).
       for (const line of lines) {
         if (!line.itemId) continue;
-        await tx.item.update({
-          where: { id: line.itemId },
-          data: { currentStock: { increment: line.quantity } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: company.id,
-            itemId: line.itemId,
-            type: "IN",
-            quantity: line.quantity,
-            reference: number,
-            notes: `Purchase: ${number}`,
-            date,
-          },
+        const costPaise = purchaseCostPaise(line, company.gstScheme);
+        await recordStockMovement(tx, {
+          companyId: company.id,
+          itemId: line.itemId,
+          direction: "IN",
+          quantity: line.quantity,
+          date,
+          reference: number,
+          notes: `Purchase: ${number}`,
+          sourceType: "PURCHASE",
+          sourceId: purchase.id,
+          valuePaise: costPaise,
+          ratePaise: line.quantity > 0 ? Math.round(costPaise / line.quantity) : 0,
         });
       }
 

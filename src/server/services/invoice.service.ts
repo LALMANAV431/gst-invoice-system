@@ -24,6 +24,7 @@ import { toPaise, toRupees } from "@/lib/money";
 import { buildInvoicePosting, LEDGER, salesLedgerForSupplyType } from "@/lib/accounting";
 import { allocateDocumentNumber, assertPeriodOpen } from "../numbering";
 import { ensureChartOfAccounts, ensurePartyLedger, postJournalEntry, deletePostingsFor } from "../ledger";
+import { estimateCostRate, recordStockMovement } from "../stock";
 
 export type InvoiceLineInput = {
   itemId?: string | null;
@@ -218,20 +219,16 @@ export async function createInvoice(input: CreateInvoiceInput) {
     for (let i = 0; i < input.lines.length; i++) {
       const src = input.lines[i];
       if (!src.itemId) continue;
-      await tx.item.update({
-        where: { id: src.itemId },
-        data: { currentStock: { decrement: Number(src.quantity) || 0 } },
-      });
-      await tx.stockMovement.create({
-        data: {
-          companyId: input.companyId,
-          itemId: src.itemId,
-          type: "OUT",
-          quantity: Number(src.quantity) || 0,
-          reference: number,
-          notes: `Sale: ${number}`,
-          date,
-        },
+      await recordStockMovement(tx, {
+        companyId: input.companyId,
+        itemId: src.itemId,
+        direction: "OUT",
+        quantity: Number(src.quantity) || 0,
+        date,
+        reference: number,
+        notes: `Sale: ${number}`,
+        sourceType: "SALE",
+        sourceId: invoice.id,
       });
     }
 
@@ -295,19 +292,20 @@ export async function deleteInvoice(companyId: string, invoiceId: string) {
     // Put the stock back.
     for (const line of invoice.items) {
       if (!line.itemId) continue;
-      await tx.item.update({
-        where: { id: line.itemId },
-        data: { currentStock: { increment: line.quantity } },
-      });
-      await tx.stockMovement.create({
-        data: {
-          companyId,
-          itemId: line.itemId,
-          type: "IN",
-          quantity: line.quantity,
-          reference: invoice.number,
-          notes: `Invoice deleted: ${invoice.number}`,
-        },
+      // Goods coming back need a COST, which no sales document states - an
+      // invoice records what we charged, not what the goods cost us. Valuing the
+      // return at the sale price would inflate closing stock by the margin.
+      const ratePaise = await estimateCostRate(tx, companyId, line.itemId);
+      await recordStockMovement(tx, {
+        companyId,
+        itemId: line.itemId,
+        direction: "IN",
+        quantity: line.quantity,
+        reference: invoice.number,
+        notes: `Invoice deleted: ${invoice.number}`,
+        sourceType: "SALES_RETURN",
+        sourceId: invoice.id,
+        ratePaise,
       });
     }
 
@@ -346,19 +344,17 @@ export async function cancelInvoice(
 
     for (const line of invoice.items) {
       if (!line.itemId) continue;
-      await tx.item.update({
-        where: { id: line.itemId },
-        data: { currentStock: { increment: line.quantity } },
-      });
-      await tx.stockMovement.create({
-        data: {
-          companyId,
-          itemId: line.itemId,
-          type: "IN",
-          quantity: line.quantity,
-          reference: invoice.number,
-          notes: `Invoice cancelled: ${invoice.number}`,
-        },
+      const ratePaise = await estimateCostRate(tx, companyId, line.itemId);
+      await recordStockMovement(tx, {
+        companyId,
+        itemId: line.itemId,
+        direction: "IN",
+        quantity: line.quantity,
+        reference: invoice.number,
+        notes: `Invoice cancelled: ${invoice.number}`,
+        sourceType: "SALES_RETURN",
+        sourceId: invoice.id,
+        ratePaise,
       });
     }
 

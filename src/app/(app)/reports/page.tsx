@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { getTranslator, normaliseLocale } from "@/lib/i18n";
 import { formatPaise, formatNumber } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Receipt, Package, FileSpreadsheet, BookOpen, Users as UsersIcon, Clock, FileJson, Scale, LineChart, Landmark, Percent } from "lucide-react";
+import { TrendingUp, TrendingDown, Receipt, Package, FileSpreadsheet, BookOpen, Users as UsersIcon, Clock, FileJson, Scale, LineChart, Landmark, Percent, Hourglass, PackageX, CalendarClock} from "lucide-react";
+import { stockSummary } from "@/server/services/inventory.service";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,16 @@ export default async function ReportsPage({
   const totalGSTPaid = (purchaseAgg._sum.taxTotalPaise ?? 0);
   const netGST = totalGSTCollected - totalGSTPaid;
 
-  const stockValue = items.reduce((s, i) => s + i.currentStock * i.purchasePricePaise, 0);
+  // Closing stock at COST, assigned by the company's valuation method (FIFO or
+  // weighted average) from the stock movement ledger.
+  //
+  // This previously read `currentStock * purchasePricePaise`, i.e. the CURRENT
+  // purchase price - so raising an item's price silently revalued stock we
+  // already held and moved profit between periods. That is not a recognised
+  // method; AS 2 requires cost assigned by FIFO or weighted average.
+  const inventory = await stockSummary(companyId);
+  const stockValue = inventory.totals.valuePaise;
+  const valuationByItem = new Map(inventory.items.map((i) => [i.itemId, i]));
 
   return (
     <div className="space-y-4">
@@ -83,6 +93,10 @@ export default async function ReportsPage({
           { href: "/reports/gst-summary", label: t("report.gstSummary"), desc: t("report.gstSummaryDesc"), icon: Percent, color: "text-rose-600 bg-rose-50" },
           { href: "/reports/cash-book", label: t("report.cashBook"), desc: t("report.cashBookDesc"), icon: BookOpen, color: "text-teal-600 bg-teal-50" },
           { href: "/reports/cash-flow", label: t("report.cashFlow"), desc: t("report.cashFlowDesc"), icon: TrendingUp, color: "text-cyan-600 bg-cyan-50" },
+          { href: "/reports/inventory", label: t("report.inventory"), desc: t("report.inventoryDesc"), icon: Package, color: "text-orange-600 bg-orange-50" },
+          { href: "/reports/inventory?view=ageing", label: t("report.stockAgeing"), desc: t("report.stockAgeingDesc"), icon: Hourglass, color: "text-amber-600 bg-amber-50" },
+          { href: "/reports/inventory?view=dead", label: t("report.deadStock"), desc: t("report.deadStockDesc"), icon: PackageX, color: "text-slate-600 bg-slate-100" },
+          { href: "/reports/inventory?view=expiry", label: t("report.expiry"), desc: t("report.expiryDesc"), icon: CalendarClock, color: "text-rose-600 bg-rose-50" },
         ].map((r) => (
           <Link key={r.href} href={r.href} className="card card-padding card-hover flex items-start gap-3">
             <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${r.color}`}>
@@ -200,7 +214,12 @@ export default async function ReportsPage({
             </div>
           </div>
 
-          <h3 className="font-semibold mt-6 mb-2 text-sm">Stock report</h3>
+          <h3 className="font-semibold mt-6 mb-2 text-sm">
+            Stock report{" "}
+            <span className="font-normal text-slate-500">
+              (at cost, {inventory.method === "FIFO" ? "FIFO" : "weighted average"})
+            </span>
+          </h3>
           <table className="table">
             <thead>
               <tr>
@@ -210,15 +229,18 @@ export default async function ReportsPage({
               </tr>
             </thead>
             <tbody>
-              {items.slice(0, 8).map((i) => (
-                <tr key={i.id}>
-                  <td>{i.name}</td>
-                  <td className="text-right">
-                    {formatNumber(i.currentStock, 0)} {i.unit}
-                  </td>
-                  <td className="text-right">{formatPaise(i.currentStock * i.purchasePricePaise)}</td>
-                </tr>
-              ))}
+              {items.slice(0, 8).map((i) => {
+                const v = valuationByItem.get(i.id);
+                return (
+                  <tr key={i.id}>
+                    <td>{i.name}</td>
+                    <td className="text-right">
+                      {formatNumber(v?.quantity ?? i.currentStock, 0)} {i.unit}
+                    </td>
+                    <td className="text-right">{formatPaise(v?.valuePaise ?? 0)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

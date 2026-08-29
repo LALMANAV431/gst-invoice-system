@@ -178,16 +178,52 @@ feature degrades cleanly to unavailable when `AI_ENABLED=false`.
 
 ## Phase 6 — Depth and scale (ongoing)
 
-- [ ] Hindi/English i18n with `next-intl` (currently English only despite the original claim)
+- [x] Hindi/English i18n — typed dictionaries; a missing key is a compile error
+- [x] Batch/expiry tracking; FIFO and weighted-average valuation; COGS; stock
+      ageing; dead stock; stock adjustments; physical counts
+      (see `docs/INVENTORY_VALUATION.md`)
+- [x] Public API webhooks (outbound, HMAC-signed, SSRF-guarded)
+- [x] 2FA (TOTP, written against RFC 6238 vectors)
 - [ ] E-invoice IRP integration via a GSP (fields already exist)
 - [ ] E-way bill API integration
 - [ ] Offline-first POS with sync
-- [ ] Batch/expiry/serial tracking; FIFO and weighted-average valuation
+- [ ] Serial-number tracking (batch tracking landed; per-unit serials did not)
 - [ ] Manufacturing (BOM, work orders); payroll
 - [ ] Customer and supplier portals
-- [ ] Public API with keys and rate limits; webhooks
+- [ ] Public API with keys and rate limits
 - [ ] White-label with custom domains
-- [ ] Background jobs (`pg-boss`); Redis caching; 2FA
+- [ ] Background jobs (`pg-boss`); Redis caching
+
+### Inventory follow-ups
+
+Deliberately left out of the valuation work, with the reasoning recorded so the
+next person does not have to rediscover it:
+
+- **Layer-exact sales-return costing.** A return currently re-enters stock at the
+  weighted average of costed receipts (`estimateCostRate`), not at the exact FIFO
+  layer the original issue consumed. Doing it properly needs a link from each
+  issue to the layers it drew from — a new table and a write on every sale. The
+  estimate stays inside the range of prices actually paid and cannot unbalance
+  anything (the returned goods form a new layer and the conservation invariant
+  still holds), so this is accuracy, not correctness.
+- **Materialised period-opening snapshots.** Valuation replays every movement for
+  an item on each request. One query loads them all and grouping happens in
+  memory, which is fine for hundreds of items but not for years of history on
+  thousands. The fix is a stored opening position per period, *not* a query per
+  item.
+- **Per-godown stock balances.** Movements record `godownId`, but `Item.godownId`
+  is a single field, so godown quantities are not a first-class balance and a
+  stock transfer does not really move stock between locations. This is an existing
+  modelling gap that the valuation work exposed rather than caused.
+- **Per-batch FIFO costing.** Batches carry quantity and expiry and are valued at
+  the item purchase price. Layered costing per batch matters for pharma; it needs
+  batch selection on every issue, which is a UI change as much as a data one.
+- **Ledger posting for stock losses.** Under periodic inventory a write-off is
+  already inside `Purchases`, so adjustments correctly post nothing. Moving to
+  perpetual inventory (capitalising receipts to `Stock-in-Hand`) would make a
+  write-off a real journal entry, and would also let the balance sheet carry stock
+  as an asset continuously rather than only after year-end closing. That is a
+  significant accounting-policy change, not a bug fix.
 
 ---
 

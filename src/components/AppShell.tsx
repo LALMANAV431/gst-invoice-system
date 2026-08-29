@@ -32,6 +32,8 @@ import {
   Sparkles,
   BookOpenCheck,
   ClipboardList,
+  SlidersHorizontal,
+  ClipboardCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -58,6 +60,8 @@ const NAV: NavItem[] = [
   { href: "/expenses", labelKey: "nav.expenses", icon: Wallet, flag: "flag_expenses" },
   { href: "/journal", labelKey: "doc.journalVoucher", icon: BookOpenCheck, flag: "flag_journal" },
   { href: "/godowns", labelKey: "nav.godowns", icon: Warehouse, flag: "flag_godowns" },
+  { href: "/stock-adjustments", labelKey: "nav.stockAdjustments", icon: SlidersHorizontal, flag: "flag_godowns" },
+  { href: "/physical-counts", labelKey: "nav.physicalCounts", icon: ClipboardCheck, flag: "flag_godowns" },
   { href: "/bank-reconciliation", labelKey: "nav.bankRecon", icon: Landmark, flag: "flag_bank" },
   { href: "/budgets", labelKey: "nav.budgets", icon: PiggyBank, flag: "flag_budgets" },
   { href: "/reports", labelKey: "nav.reports", icon: BarChart3 },

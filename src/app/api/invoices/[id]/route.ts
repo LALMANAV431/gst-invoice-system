@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { estimateCostRate, recordStockMovement } from "@/server/stock";
 import { writeGuard } from "@/lib/guard";
 import { logAudit } from "@/lib/audit";
 
@@ -31,19 +32,17 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
     // Reverse stock movements
     for (const it of invoice.items) {
       if (it.itemId) {
-        await tx.item.update({
-          where: { id: it.itemId },
-          data: { currentStock: { increment: it.quantity } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: ctx.company!.id,
-            itemId: it.itemId,
-            type: "IN",
-            quantity: it.quantity,
-            reference: invoice.number,
-            notes: `Reversed: ${invoice.number}`,
-          },
+        const ratePaise = await estimateCostRate(tx, ctx.company!.id, it.itemId);
+        await recordStockMovement(tx, {
+          companyId: ctx.company!.id,
+          itemId: it.itemId,
+          direction: "IN",
+          quantity: it.quantity,
+          reference: invoice.number,
+          notes: `Reversed: ${invoice.number}`,
+          sourceType: "SALES_RETURN",
+          sourceId: invoice.id,
+          ratePaise,
         });
       }
     }

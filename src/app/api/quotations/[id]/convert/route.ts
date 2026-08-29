@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { recordStockMovement } from "@/server/stock";
 import { writeGuard } from "@/lib/guard";
 import { logAudit } from "@/lib/audit";
 import { allocateDocumentNumber, assertPeriodOpen, PeriodLockedError } from "@/server/numbering";
@@ -92,20 +93,16 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
 
       for (const it of quotation.items) {
         if (!it.itemId) continue;
-        await tx.item.update({
-          where: { id: it.itemId },
-          data: { currentStock: { decrement: it.quantity } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: company.id,
-            itemId: it.itemId,
-            type: "OUT",
-            quantity: it.quantity,
-            reference: number,
-            notes: `Sale (from ${quotation.number}): ${number}`,
-            date,
-          },
+        await recordStockMovement(tx, {
+          companyId: company.id,
+          itemId: it.itemId,
+          direction: "OUT",
+          quantity: it.quantity,
+          date,
+          reference: number,
+          notes: `Sale (from ${quotation.number}): ${number}`,
+          sourceType: "SALE",
+          sourceId: created.id,
         });
       }
 

@@ -111,6 +111,13 @@ model Company {
   gstScheme     String   @default("REGULAR")
   // Round invoice grand totals to the nearest rupee.
   roundInvoices Boolean  @default(true)
+  // FIFO | WEIGHTED_AVERAGE. AS 2 permits either but requires the choice to be
+  // applied consistently, so it lives on the company rather than the item.
+  stockValuationMethod String @default("FIFO")
+  // Days without an issue before stock is reported as dead/slow-moving.
+  deadStockDays Int @default(90)
+  adjustmentPrefix String @default("ADJ")
+  stockCountPrefix String @default("PC")
   plan          String   @default("FREE") // FREE | BASIC | PREMIUM
   planExpiry    DateTime?
   isSuspended   Boolean  @default(false)
@@ -150,6 +157,9 @@ model Company {
   notificationSettings NotificationSetting[]
   messageLogs    MessageLog[]
   outboundWebhooks OutboundWebhook[]
+  batches        Batch[]
+  stockAdjustments StockAdjustment[]
+  physicalCounts PhysicalCount[]
 }
 
 model Party {
@@ -204,8 +214,14 @@ model Item {
   // EXCLUSIVE | INCLUSIVE - whether salePrice already contains GST (MRP goods)
   pricingMode  String   @default("EXCLUSIVE")
   openingStock Float    @default(0)
+  // Unit cost of the opening stock. Kept separate from purchasePricePaise so
+  // that re-pricing an item does not retrospectively revalue stock we already
+  // held, which is exactly the defect the old valuation formula had.
+  openingRatePaise Int  @default(0)
   currentStock Float    @default(0)
   lowStockAlert Float   @default(0)
+  // Track batch numbers and expiry for this item (pharma, food, chemicals).
+  trackBatches Boolean  @default(false)
   description  String?
   godownId     String?
   createdAt    DateTime @default(now())
@@ -221,6 +237,9 @@ model Item {
   quotationItems  QuotationItem[]
   creditNoteItems CreditNoteItem[]
   orderDocumentItems OrderDocumentItem[]
+  batches         Batch[]
+  adjustmentItems StockAdjustmentItem[]
+  countItems      PhysicalCountItem[]
 
   @@index([companyId])
   @@index([companyId, barcode])
@@ -403,6 +422,10 @@ model Payment {
   @@index([companyId, partyId, date])
 }
 
+// The stock ledger. Every quantity change in the system writes one row here,
+// and inventory valuation is derived by replaying it - nothing about cost is
+// stored as a running total, so a valuation can never drift out of agreement
+// with the movements that produced it.
 model StockMovement {
   id        String   @id @default(cuid())
   date      DateTime @default(now())
@@ -411,12 +434,167 @@ model StockMovement {
   reference String?  // invoice/purchase number
   notes     String?
 
+  // Cost of the movement. Authoritative for IN; the valuation engine works out
+  // what an OUT cost, so these stay 0 on issues rather than storing a sale
+  // price that would be mistaken for cost.
+  ratePaise  Int @default(0)
+  valuePaise Int @default(0)
+
+  // What caused this movement: OPENING | PURCHASE | PURCHASE_RETURN | SALE |
+  // SALES_RETURN | DELIVERY_CHALLAN | GRN | TRANSFER | ADJUSTMENT | COUNT
+  sourceType String?
+  // Id of the causing document, so a movement can be traced back and a report
+  // can link straight to it.
+  sourceId   String?
+
+  godownId String?
+  batchId  String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  godown    Godown? @relation(fields: [godownId], references: [id])
+  batch     Batch?  @relation(fields: [batchId], references: [id])
+
+  @@index([companyId, itemId])
+  // Valuation replays movements in date order for one item; without this index
+  // it is a full scan of the company's entire stock history per item.
+  @@index([companyId, itemId, date])
+  @@index([companyId, sourceType, sourceId])
+}
+
+// A batch/lot of an item, for goods where shelf life or traceability matters.
+model Batch {
+  id         String    @id @default(cuid())
+  batchNo    String
+  mfgDate    DateTime?
+  expiryDate DateTime?
+  notes      String?
+  // Running quantity for this batch, maintained alongside Item.currentStock.
+  quantity   Float     @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   itemId    String
   item      Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  @@index([companyId, itemId])
+  movements       StockMovement[]
+  adjustmentItems StockAdjustmentItem[]
+
+  // A batch number identifies goods within one item, not across the company.
+  @@unique([itemId, batchNo])
+  @@index([companyId, expiryDate])
+}
+
+// A deliberate correction to stock that no invoice or purchase explains:
+// damage, theft, expiry, internal consumption, production output, or the
+// variance found by a physical count.
+//
+// Adjustments do NOT post to the ledger. The books use periodic inventory -
+// purchases are charged to the Purchases expense on receipt rather than
+// capitalised to a stock asset - so goods written off here have already been
+// expensed. Posting again would double-count the loss. See
+// docs/GST_COMPLIANCE_NOTES.md.
+model StockAdjustment {
+  id     String   @id @default(cuid())
+  number String
+  date   DateTime @default(now())
+  // See ADJUSTMENT_REASONS in src/lib/inventory.ts. The reason fixes the
+  // direction, so a "damage" cannot be filed as a stock increase.
+  reason String
+  notes  String?
+  godownId String?
+
+  // Set when this adjustment was produced by posting a physical count, which is
+  // the only way count variances reach stock - one audited path, not two.
+  physicalCountId String? @unique
+
+  createdAt DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  godown    Godown? @relation(fields: [godownId], references: [id])
+  physicalCount PhysicalCount? @relation(fields: [physicalCountId], references: [id])
+
+  items StockAdjustmentItem[]
+
+  @@unique([companyId, number])
+  @@index([companyId, date])
+}
+
+model StockAdjustmentItem {
+  id       String @id @default(cuid())
+  quantity Float
+  // IN | OUT, copied from the parent reason so a line is self-describing in
+  // reports and cannot be reinterpreted if reason codes are ever extended.
+  direction String
+  // Cost used to value the movement. For a write-off this is what the goods
+  // cost us, not what we would have sold them for.
+  ratePaise  Int @default(0)
+  valuePaise Int @default(0)
+  notes    String?
+
+  adjustmentId String
+  adjustment   StockAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  itemId       String
+  item         Item            @relation(fields: [itemId], references: [id])
+  batchId      String?
+  batch        Batch?          @relation(fields: [batchId], references: [id])
+
+  @@index([adjustmentId])
+}
+
+// A stock take. Counted quantities are captured against a frozen snapshot of
+// the system position, then posted as a single StockAdjustment.
+model PhysicalCount {
+  id     String   @id @default(cuid())
+  number String
+  date   DateTime @default(now())
+  // DRAFT | POSTED | CANCELLED. A draft can be edited; a posted count is
+  // evidence and is immutable.
+  status String   @default("DRAFT")
+  notes  String?
+  godownId String?
+  countedBy String?
+  postedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  godown    Godown? @relation(fields: [godownId], references: [id])
+
+  items      PhysicalCountItem[]
+  adjustment StockAdjustment?
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+model PhysicalCountItem {
+  id String @id @default(cuid())
+  // The book position at the moment the sheet was created. Frozen, because the
+  // whole value of a count is the comparison against what the books claimed at
+  // that time - recomputing it later would quietly erase the variance.
+  systemQuantity  Float
+  countedQuantity Float
+  // countedQuantity - systemQuantity, stored so a posted count keeps the
+  // variance it was posted on.
+  variance        Float @default(0)
+  ratePaise       Int   @default(0)
+  notes           String?
+
+  countId String
+  count   PhysicalCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  itemId  String
+  item    Item          @relation(fields: [itemId], references: [id])
+
+  @@unique([countId, itemId])
+  @@index([countId])
 }
 
 
@@ -711,6 +889,9 @@ model Godown {
   transfersFrom  StockTransfer[] @relation("TransferFrom")
   transfersTo    StockTransfer[] @relation("TransferTo")
   orderDocuments OrderDocument[]
+  stockMovements StockMovement[]
+  stockAdjustments StockAdjustment[]
+  physicalCounts PhysicalCount[]
 
   @@index([companyId])
 }
