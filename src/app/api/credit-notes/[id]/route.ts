@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { estimateCostRate, recordStockMovement } from "@/server/stock";
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const ctx = await getCurrentUserAndCompany();
@@ -27,22 +28,20 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
     const reverseType = note.kind === "CREDIT" ? "OUT" : "IN";
     for (const it of note.items) {
       if (it.itemId) {
-        await tx.item.update({
-          where: { id: it.itemId },
-          data: {
-            currentStock:
-              reverseType === "IN" ? { increment: it.quantity } : { decrement: it.quantity },
-          },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: ctx.company!.id,
-            itemId: it.itemId,
-            type: reverseType,
-            quantity: it.quantity,
-            reference: note.number,
-            notes: `Reversed: ${note.number}`,
-          },
+        const ratePaise =
+          reverseType === "IN"
+            ? await estimateCostRate(tx, ctx.company!.id, it.itemId)
+            : undefined;
+        await recordStockMovement(tx, {
+          companyId: ctx.company!.id,
+          itemId: it.itemId,
+          direction: reverseType,
+          quantity: it.quantity,
+          reference: note.number,
+          notes: `Reversed: ${note.number}`,
+          sourceType: note.kind === "CREDIT" ? "SALE" : "PURCHASE",
+          sourceId: note.id,
+          ratePaise,
         });
       }
     }

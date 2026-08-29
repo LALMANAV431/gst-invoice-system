@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSuperAdmin } from "@/lib/auth";
+import { toPaise } from "@/lib/money";
 
 export async function GET() {
   const admin = await getSuperAdmin();
@@ -23,7 +24,8 @@ export async function POST(req: Request) {
       code,
       description: body.description || null,
       type: body.type === "FLAT" ? "FLAT" : "PERCENT",
-      value: parseFloat(body.value) || 0,
+      percentOff: body.type === "FLAT" ? 0 : parseFloat(body.percentOff ?? body.value) || 0,
+      flatOffPaise: body.type === "FLAT" ? toPaise(body.flatOff ?? body.value ?? 0) : 0,
       appliesToPlan: body.appliesToPlan || null,
       maxRedemptions: body.maxRedemptions ? parseInt(body.maxRedemptions) : null,
       active: body.active !== false,

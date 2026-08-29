@@ -7,11 +7,17 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:admin": "tsx prisma/seed-admin.ts",
     "db:setup": "prisma db push && tsx prisma/seed.ts",
-    "package:portable": "next build && node scripts/package-portable.mjs"
+    "package:portable": "next build && node scripts/package-portable.mjs",
+    "docs:openapi": "tsx scripts/write-openapi.mjs",
+    "docs:openapi:check": "tsx scripts/write-openapi.mjs --check"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -20,10 +26,10 @@
     "framer-motion": "^11.18.2",
     "html5-qrcode": "^2.3.8",
     "jsonwebtoken": "^9.0.2",
-    "jspdf": "^2.5.2",
-    "jspdf-autotable": "^3.8.4",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.456.0",
-    "next": "14.2.18",
+    "next": "^14.2.35",
     "papaparse": "^5.5.3",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
@@ -43,11 +49,12 @@
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.20",
     "eslint": "^8",
-    "eslint-config-next": "14.2.18",
+    "eslint-config-next": "^14.2.35",
     "postcss": "^8.4.49",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.14",
     "tsx": "^4.19.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

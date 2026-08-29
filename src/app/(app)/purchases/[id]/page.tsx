@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { notFound } from "next/navigation";
-import { formatDate, formatINR } from "@/lib/utils";
+import { formatDate, formatPaise } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import PurchaseActions from "./PurchaseActions";
@@ -63,11 +63,11 @@ export default async function PurchaseDetailPage({ params }: { params: { id: str
                 <td className="text-right">
                   {it.quantity} {it.unit}
                 </td>
-                <td className="text-right">{formatINR(it.rate)}</td>
-                <td className="text-right">{formatINR(it.taxableAmount)}</td>
+                <td className="text-right">{formatPaise(it.ratePaise)}</td>
+                <td className="text-right">{formatPaise(it.taxablePaise)}</td>
                 <td className="text-right">{it.gstRate}%</td>
-                <td className="text-right">{formatINR(it.cgst + it.sgst + it.igst)}</td>
-                <td className="text-right font-semibold">{formatINR(it.total)}</td>
+                <td className="text-right">{formatPaise(it.cgstPaise + it.sgstPaise + it.igstPaise)}</td>
+                <td className="text-right font-semibold">{formatPaise(it.totalPaise)}</td>
               </tr>
             ))}
           </tbody>
@@ -75,24 +75,24 @@ export default async function PurchaseDetailPage({ params }: { params: { id: str
 
         <div className="flex justify-end">
           <div className="w-72 text-sm">
-            <Row label="Subtotal" value={formatINR(purchase.subTotal)} />
+            <Row label="Subtotal" value={formatPaise(purchase.subTotalPaise)} />
             {purchase.isInterState ? (
-              <Row label="IGST" value={formatINR(purchase.igstTotal)} />
+              <Row label="IGST" value={formatPaise(purchase.igstTotalPaise)} />
             ) : (
               <>
-                <Row label="CGST" value={formatINR(purchase.cgstTotal)} />
-                <Row label="SGST" value={formatINR(purchase.sgstTotal)} />
+                <Row label="CGST" value={formatPaise(purchase.cgstTotalPaise)} />
+                <Row label="SGST" value={formatPaise(purchase.sgstTotalPaise)} />
               </>
             )}
-            {purchase.discount > 0 && (
-              <Row label="Discount" value={`- ${formatINR(purchase.discount)}`} />
+            {purchase.discountPaise > 0 && (
+              <Row label="Discount" value={`- ${formatPaise(purchase.discountPaise)}`} />
             )}
             <div className="flex justify-between border-t border-slate-200 mt-2 pt-2 font-bold text-lg">
               <span>Total</span>
-              <span>{formatINR(purchase.grandTotal)}</span>
+              <span>{formatPaise(purchase.grandTotalPaise)}</span>
             </div>
-            {purchase.amountPaid > 0 && (
-              <Row label="Paid" value={formatINR(purchase.amountPaid)} />
+            {purchase.amountPaidPaise > 0 && (
+              <Row label="Paid" value={formatPaise(purchase.amountPaidPaise)} />
             )}
           </div>
         </div>

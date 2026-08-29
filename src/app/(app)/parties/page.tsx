@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/utils";
 import { Plus, Pencil } from "lucide-react";
 import DeleteButton from "./DeleteButton";
 import EmptyState from "@/components/EmptyState";
@@ -28,28 +28,28 @@ export default async function PartiesPage({
     parties.map(async (p) => {
       const inv = await db.invoice.aggregate({
         where: { partyId: p.id },
-        _sum: { grandTotal: true, amountPaid: true },
+        _sum: { grandTotalPaise: true, amountPaidPaise: true },
       });
       const pur = await db.purchase.aggregate({
         where: { partyId: p.id },
-        _sum: { grandTotal: true, amountPaid: true },
+        _sum: { grandTotalPaise: true, amountPaidPaise: true },
       });
       const creditAgg = await db.creditNote.aggregate({
         where: { partyId: p.id, kind: "CREDIT" },
-        _sum: { grandTotal: true },
+        _sum: { grandTotalPaise: true },
       });
       const debitAgg = await db.creditNote.aggregate({
         where: { partyId: p.id, kind: "DEBIT" },
-        _sum: { grandTotal: true },
+        _sum: { grandTotalPaise: true },
       });
       const receivable =
-        (inv._sum.grandTotal ?? 0) - (inv._sum.amountPaid ?? 0) -
-        (creditAgg._sum.grandTotal ?? 0) +
-        (p.balanceType === "RECEIVABLE" ? p.openingBalance : 0);
+        (inv._sum.grandTotalPaise ?? 0) - (inv._sum.amountPaidPaise ?? 0) -
+        (creditAgg._sum.grandTotalPaise ?? 0) +
+        (p.balanceType === "RECEIVABLE" ? p.openingBalancePaise : 0);
       const payable =
-        (pur._sum.grandTotal ?? 0) - (pur._sum.amountPaid ?? 0) -
-        (debitAgg._sum.grandTotal ?? 0) +
-        (p.balanceType === "PAYABLE" ? p.openingBalance : 0);
+        (pur._sum.grandTotalPaise ?? 0) - (pur._sum.amountPaidPaise ?? 0) -
+        (debitAgg._sum.grandTotalPaise ?? 0) +
+        (p.balanceType === "PAYABLE" ? p.openingBalancePaise : 0);
       return { id: p.id, receivable, payable };
     })
   );
@@ -66,7 +66,7 @@ export default async function PartiesPage({
           <CsvImport
             endpoint="/api/parties/import"
             label="Import"
-            sampleHeaders={["name", "type", "gstin", "phone", "email", "city", "state", "stateCode", "openingBalance"]}
+            sampleHeaders={["name", "type", "gstin", "phone", "email", "city", "state", "stateCode", "openingBalancePaise"]}
           />
           <Link href="/parties/new" className="btn-primary">
             <Plus className="h-4 w-4" /> Add Party
@@ -137,10 +137,10 @@ export default async function PartiesPage({
                       <td>{p.phone || "—"}</td>
                       <td>{p.city || "—"}</td>
                       <td className="text-right text-emerald-700 font-medium">
-                        {b && b.receivable > 0 ? formatINR(b.receivable) : "—"}
+                        {b && b.receivable > 0 ? formatPaise(b.receivable) : "—"}
                       </td>
                       <td className="text-right text-rose-700 font-medium">
-                        {b && b.payable > 0 ? formatINR(b.payable) : "—"}
+                        {b && b.payable > 0 ? formatPaise(b.payable) : "—"}
                       </td>
                       <td>
                         <div className="flex justify-end gap-1">

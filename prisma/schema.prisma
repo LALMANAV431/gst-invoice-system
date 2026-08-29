@@ -1,3 +1,25 @@
+// ============================================================================
+// GST Invoice System - database schema
+//
+// MONEY REPRESENTATION
+// --------------------
+// Every monetary column is an INTEGER NUMBER OF PAISE and is suffixed `Paise`.
+// This is deliberate: the previous schema used `Float` for 93 money columns,
+// which lost money. Accumulating 100 lines of (3 x Rs 33.33) produced
+// 9998.999999999984 instead of 9999.
+//
+// Integers are exact. The `Paise` suffix makes a stray float visible in review.
+// Use the helpers in src/lib/money.ts - never do arithmetic on rupee floats.
+//
+// `Int` in SQLite is a 64-bit INTEGER, so there is no practical ceiling here.
+// On PostgreSQL, `Int` is 32-bit and caps a single column at ~Rs 2.14 crore;
+// switch cumulative columns to `BigInt` when migrating. See docs/DATABASE.md.
+//
+// Rates (gstRate, cessRate, tdsRate) stay `Float` - they are percentages, not
+// money, and 0.25% is a real GST slab.
+// Quantities stay `Float` - 2.5 kg is a legitimate quantity.
+// ============================================================================
+
 generator client {
   provider      = "prisma-client-js"
   // Include Windows + common Linux engines so the build can be packaged
@@ -17,12 +39,30 @@ model User {
   name         String
   role         String   @default("ADMIN") // ADMIN | ACCOUNTANT | OPERATOR | VIEWER
   isSuperAdmin Boolean  @default(false)
+  // UI language: "en" | "hi". Stored on the user rather than in a cookie so the
+  // choice follows them across devices.
+  locale       String   @default("en")
+  // Bumped to invalidate every existing JWT for this user (logout-everywhere,
+  // password change, suspension). Checked on each request.
+  tokenVersion Int      @default(0)
+
+  // --- Two-factor authentication ---
+  // Base32 TOTP secret. Stored only once 2FA is confirmed working, so a failed
+  // enrolment cannot lock the user out.
+  totpSecret        String?
+  totpEnabledAt     DateTime?
+  // Last accepted TOTP counter, so a code cannot be replayed inside its window.
+  totpLastCounter   Int?
+  // SHA-256 hashes of single-use recovery codes, comma-separated. Without these a
+  // lost phone locks the owner out of their own books permanently.
+  recoveryCodeHashes String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   companies   Company[]
   memberships TeamMember[]
   auditLogs   AuditLog[]
+  notifications Notification[]
 }
 
 model TeamMember {
@@ -59,12 +99,25 @@ model Company {
   creditNotePrefix String @default("CN")
   debitNotePrefix String  @default("DN")
   expensePrefix String   @default("EXP")
+  journalPrefix String   @default("JV")
   financialYear String   @default("2025-26")
   terms         String?
   bankName      String?
   bankAccountNo String?
   bankIfsc      String?
   upiId         String?
+  // REGULAR | COMPOSITION. Composition dealers issue a bill of supply and
+  // cannot collect GST, so this changes document behaviour.
+  gstScheme     String   @default("REGULAR")
+  // Round invoice grand totals to the nearest rupee.
+  roundInvoices Boolean  @default(true)
+  // FIFO | WEIGHTED_AVERAGE. AS 2 permits either but requires the choice to be
+  // applied consistently, so it lives on the company rather than the item.
+  stockValuationMethod String @default("FIFO")
+  // Days without an issue before stock is reported as dead/slow-moving.
+  deadStockDays Int @default(90)
+  adjustmentPrefix String @default("ADJ")
+  stockCountPrefix String @default("PC")
   plan          String   @default("FREE") // FREE | BASIC | PREMIUM
   planExpiry    DateTime?
   isSuspended   Boolean  @default(false)
@@ -90,6 +143,23 @@ model Company {
   bankTransactions  BankTransaction[]
   budgets        Budget[]
   auditLogs      AuditLog[]
+  ledgerGroups   LedgerGroup[]
+  ledgers        Ledger[]
+  journalEntries JournalEntry[]
+  counters       DocumentCounter[]
+  financialYears FinancialYear[]
+  aiUsageLogs    AiUsageLog[]
+  orderDocuments OrderDocument[]
+  paymentLinks   PaymentLink[]
+  subscription   Subscription?
+  billingInvoices BillingInvoice[]
+  notifications  Notification[]
+  notificationSettings NotificationSetting[]
+  messageLogs    MessageLog[]
+  outboundWebhooks OutboundWebhook[]
+  batches        Batch[]
+  stockAdjustments StockAdjustment[]
+  physicalCounts PhysicalCount[]
 }
 
 model Party {
@@ -105,8 +175,9 @@ model Party {
   state        String?
   pincode      String?
   stateCode    String?
-  openingBalance Float  @default(0)
+  openingBalancePaise Int @default(0)
   balanceType  String   @default("RECEIVABLE") // RECEIVABLE | PAYABLE
+  creditLimitPaise Int  @default(0) // 0 = no limit
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -119,8 +190,11 @@ model Party {
   quotations  Quotation[]
   creditNotes CreditNote[]
   expenses    Expense[]
+  ledger      Ledger?
+  orderDocuments OrderDocument[]
 
   @@index([companyId])
+  @@index([companyId, gstin])
 }
 
 model Item {
@@ -130,12 +204,24 @@ model Item {
   hsn          String?
   barcode      String?
   unit         String   @default("NOS")
-  salePrice    Float    @default(0)
-  purchasePrice Float   @default(0)
+  salePricePaise     Int @default(0)
+  purchasePricePaise Int @default(0)
   gstRate      Float    @default(18)
+  cessRate     Float    @default(0)
+  cessPerUnitPaise Int  @default(0)
+  // TAXABLE | EXEMPT | NIL_RATED | NON_GST | ZERO_RATED
+  supplyType   String   @default("TAXABLE")
+  // EXCLUSIVE | INCLUSIVE - whether salePrice already contains GST (MRP goods)
+  pricingMode  String   @default("EXCLUSIVE")
   openingStock Float    @default(0)
+  // Unit cost of the opening stock. Kept separate from purchasePricePaise so
+  // that re-pricing an item does not retrospectively revalue stock we already
+  // held, which is exactly the defect the old valuation formula had.
+  openingRatePaise Int  @default(0)
   currentStock Float    @default(0)
   lowStockAlert Float   @default(0)
+  // Track batch numbers and expiry for this item (pharma, food, chemicals).
+  trackBatches Boolean  @default(false)
   description  String?
   godownId     String?
   createdAt    DateTime @default(now())
@@ -150,8 +236,13 @@ model Item {
   stockMovements StockMovement[]
   quotationItems  QuotationItem[]
   creditNoteItems CreditNoteItem[]
+  orderDocumentItems OrderDocumentItem[]
+  batches         Batch[]
+  adjustmentItems StockAdjustmentItem[]
+  countItems      PhysicalCountItem[]
 
   @@index([companyId])
+  @@index([companyId, barcode])
 }
 
 model Invoice {
@@ -160,19 +251,27 @@ model Invoice {
   date          DateTime @default(now())
   dueDate       DateTime?
   notes         String?
-  status        String   @default("UNPAID") // PAID | PARTIAL | UNPAID
-  subTotal      Float    @default(0)
-  cgstTotal     Float    @default(0)
-  sgstTotal     Float    @default(0)
-  igstTotal     Float    @default(0)
-  taxTotal      Float    @default(0)
-  discount      Float    @default(0)
-  roundOff      Float    @default(0)
-  grandTotal    Float    @default(0)
-  amountPaid    Float    @default(0)
+  status        String   @default("UNPAID") // PAID | PARTIAL | UNPAID | CANCELLED
+  subTotalPaise   Int    @default(0)
+  cgstTotalPaise  Int    @default(0)
+  sgstTotalPaise  Int    @default(0)
+  igstTotalPaise  Int    @default(0)
+  cessTotalPaise  Int    @default(0)
+  taxTotalPaise   Int    @default(0)
+  discountPaise   Int    @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int    @default(0)
+  grandTotalPaise Int    @default(0)
+  amountPaidPaise Int    @default(0)
   isInterState  Boolean  @default(false)
+  reverseCharge Boolean  @default(false)
+  // 2-digit GST state code. Stored rather than derived so the invoice can be
+  // reproduced exactly even if the party's address changes later.
+  placeOfSupply String?
   tdsRate       Float    @default(0)
-  tdsAmount     Float    @default(0)
+  tdsPaise      Int      @default(0)
+  cancelledAt   DateTime?
+  cancelReason  String?
   irn           String?
   ackNo         String?
   ackDate       DateTime?
@@ -189,9 +288,11 @@ model Invoice {
 
   items    InvoiceItem[]
   payments Payment[]
+  paymentLinks PaymentLink[]
 
   @@unique([companyId, number])
   @@index([companyId, date])
+  @@index([companyId, status, dueDate])
 }
 
 model InvoiceItem {
@@ -201,18 +302,28 @@ model InvoiceItem {
   hsn        String?
   quantity   Float
   unit       String  @default("NOS")
-  rate       Float
-  discount   Float   @default(0)
-  taxableAmount Float @default(0)
+  ratePaise     Int
+  discountPaise Int  @default(0)
+  // Share of the invoice-level discount allocated to this line. Stored so the
+  // invoice reproduces exactly even if apportionment logic changes.
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int  @default(0)
   gstRate    Float   @default(0)
-  cgst       Float   @default(0)
-  sgst       Float   @default(0)
-  igst       Float   @default(0)
-  total      Float   @default(0)
+  cessRate   Float   @default(0)
+  cessPerUnitPaise Int @default(0)
+  cgstPaise  Int     @default(0)
+  sgstPaise  Int     @default(0)
+  igstPaise  Int     @default(0)
+  cessPaise  Int     @default(0)
+  totalPaise Int     @default(0)
+  supplyType String  @default("TAXABLE")
+  pricingMode String @default("EXCLUSIVE")
 
   invoiceId String
   invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item      Item?   @relation(fields: [itemId], references: [id])
+
+  @@index([invoiceId])
 }
 
 model Purchase {
@@ -223,16 +334,22 @@ model Purchase {
   dueDate       DateTime?
   notes         String?
   status        String   @default("UNPAID")
-  subTotal      Float    @default(0)
-  cgstTotal     Float    @default(0)
-  sgstTotal     Float    @default(0)
-  igstTotal     Float    @default(0)
-  taxTotal      Float    @default(0)
-  discount      Float    @default(0)
-  roundOff      Float    @default(0)
-  grandTotal    Float    @default(0)
-  amountPaid    Float    @default(0)
+  subTotalPaise   Int    @default(0)
+  cgstTotalPaise  Int    @default(0)
+  sgstTotalPaise  Int    @default(0)
+  igstTotalPaise  Int    @default(0)
+  cessTotalPaise  Int    @default(0)
+  taxTotalPaise   Int    @default(0)
+  discountPaise   Int    @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int    @default(0)
+  grandTotalPaise Int    @default(0)
+  amountPaidPaise Int    @default(0)
   isInterState  Boolean  @default(false)
+  reverseCharge Boolean  @default(false)
+  placeOfSupply String?
+  // Input tax credit eligibility on this purchase.
+  itcEligible   Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -246,6 +363,7 @@ model Purchase {
 
   @@unique([companyId, number])
   @@index([companyId, date])
+  @@index([companyId, status, dueDate])
 }
 
 model PurchaseItem {
@@ -255,18 +373,26 @@ model PurchaseItem {
   hsn        String?
   quantity   Float
   unit       String  @default("NOS")
-  rate       Float
-  discount   Float   @default(0)
-  taxableAmount Float @default(0)
+  ratePaise     Int
+  discountPaise Int  @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int  @default(0)
   gstRate    Float   @default(0)
-  cgst       Float   @default(0)
-  sgst       Float   @default(0)
-  igst       Float   @default(0)
-  total      Float   @default(0)
+  cessRate   Float   @default(0)
+  cessPerUnitPaise Int @default(0)
+  cgstPaise  Int     @default(0)
+  sgstPaise  Int     @default(0)
+  igstPaise  Int     @default(0)
+  cessPaise  Int     @default(0)
+  totalPaise Int     @default(0)
+  supplyType String  @default("TAXABLE")
+  pricingMode String @default("EXCLUSIVE")
 
   purchaseId String
   purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   item       Item?    @relation(fields: [itemId], references: [id])
+
+  @@index([purchaseId])
 }
 
 model Payment {
@@ -276,7 +402,7 @@ model Payment {
   type       String   // RECEIVED | PAID
   mode       String   @default("CASH") // CASH | BANK | UPI | CHEQUE | CARD
   reference  String?
-  amount     Float
+  amountPaise Int
   notes      String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -293,8 +419,13 @@ model Payment {
 
   @@unique([companyId, number])
   @@index([companyId, date])
+  @@index([companyId, partyId, date])
 }
 
+// The stock ledger. Every quantity change in the system writes one row here,
+// and inventory valuation is derived by replaying it - nothing about cost is
+// stored as a running total, so a valuation can never drift out of agreement
+// with the movements that produced it.
 model StockMovement {
   id        String   @id @default(cuid())
   date      DateTime @default(now())
@@ -303,12 +434,167 @@ model StockMovement {
   reference String?  // invoice/purchase number
   notes     String?
 
+  // Cost of the movement. Authoritative for IN; the valuation engine works out
+  // what an OUT cost, so these stay 0 on issues rather than storing a sale
+  // price that would be mistaken for cost.
+  ratePaise  Int @default(0)
+  valuePaise Int @default(0)
+
+  // What caused this movement: OPENING | PURCHASE | PURCHASE_RETURN | SALE |
+  // SALES_RETURN | DELIVERY_CHALLAN | GRN | TRANSFER | ADJUSTMENT | COUNT
+  sourceType String?
+  // Id of the causing document, so a movement can be traced back and a report
+  // can link straight to it.
+  sourceId   String?
+
+  godownId String?
+  batchId  String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  godown    Godown? @relation(fields: [godownId], references: [id])
+  batch     Batch?  @relation(fields: [batchId], references: [id])
+
+  @@index([companyId, itemId])
+  // Valuation replays movements in date order for one item; without this index
+  // it is a full scan of the company's entire stock history per item.
+  @@index([companyId, itemId, date])
+  @@index([companyId, sourceType, sourceId])
+}
+
+// A batch/lot of an item, for goods where shelf life or traceability matters.
+model Batch {
+  id         String    @id @default(cuid())
+  batchNo    String
+  mfgDate    DateTime?
+  expiryDate DateTime?
+  notes      String?
+  // Running quantity for this batch, maintained alongside Item.currentStock.
+  quantity   Float     @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   itemId    String
   item      Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  @@index([companyId, itemId])
+  movements       StockMovement[]
+  adjustmentItems StockAdjustmentItem[]
+
+  // A batch number identifies goods within one item, not across the company.
+  @@unique([itemId, batchNo])
+  @@index([companyId, expiryDate])
+}
+
+// A deliberate correction to stock that no invoice or purchase explains:
+// damage, theft, expiry, internal consumption, production output, or the
+// variance found by a physical count.
+//
+// Adjustments do NOT post to the ledger. The books use periodic inventory -
+// purchases are charged to the Purchases expense on receipt rather than
+// capitalised to a stock asset - so goods written off here have already been
+// expensed. Posting again would double-count the loss. See
+// docs/GST_COMPLIANCE_NOTES.md.
+model StockAdjustment {
+  id     String   @id @default(cuid())
+  number String
+  date   DateTime @default(now())
+  // See ADJUSTMENT_REASONS in src/lib/inventory.ts. The reason fixes the
+  // direction, so a "damage" cannot be filed as a stock increase.
+  reason String
+  notes  String?
+  godownId String?
+
+  // Set when this adjustment was produced by posting a physical count, which is
+  // the only way count variances reach stock - one audited path, not two.
+  physicalCountId String? @unique
+
+  createdAt DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  godown    Godown? @relation(fields: [godownId], references: [id])
+  physicalCount PhysicalCount? @relation(fields: [physicalCountId], references: [id])
+
+  items StockAdjustmentItem[]
+
+  @@unique([companyId, number])
+  @@index([companyId, date])
+}
+
+model StockAdjustmentItem {
+  id       String @id @default(cuid())
+  quantity Float
+  // IN | OUT, copied from the parent reason so a line is self-describing in
+  // reports and cannot be reinterpreted if reason codes are ever extended.
+  direction String
+  // Cost used to value the movement. For a write-off this is what the goods
+  // cost us, not what we would have sold them for.
+  ratePaise  Int @default(0)
+  valuePaise Int @default(0)
+  notes    String?
+
+  adjustmentId String
+  adjustment   StockAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  itemId       String
+  item         Item            @relation(fields: [itemId], references: [id])
+  batchId      String?
+  batch        Batch?          @relation(fields: [batchId], references: [id])
+
+  @@index([adjustmentId])
+}
+
+// A stock take. Counted quantities are captured against a frozen snapshot of
+// the system position, then posted as a single StockAdjustment.
+model PhysicalCount {
+  id     String   @id @default(cuid())
+  number String
+  date   DateTime @default(now())
+  // DRAFT | POSTED | CANCELLED. A draft can be edited; a posted count is
+  // evidence and is immutable.
+  status String   @default("DRAFT")
+  notes  String?
+  godownId String?
+  countedBy String?
+  postedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  godown    Godown? @relation(fields: [godownId], references: [id])
+
+  items      PhysicalCountItem[]
+  adjustment StockAdjustment?
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+model PhysicalCountItem {
+  id String @id @default(cuid())
+  // The book position at the moment the sheet was created. Frozen, because the
+  // whole value of a count is the comparison against what the books claimed at
+  // that time - recomputing it later would quietly erase the variance.
+  systemQuantity  Float
+  countedQuantity Float
+  // countedQuantity - systemQuantity, stored so a posted count keeps the
+  // variance it was posted on.
+  variance        Float @default(0)
+  ratePaise       Int   @default(0)
+  notes           String?
+
+  countId String
+  count   PhysicalCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  itemId  String
+  item    Item          @relation(fields: [itemId], references: [id])
+
+  @@unique([countId, itemId])
+  @@index([countId])
 }
 
 
@@ -319,15 +605,19 @@ model Quotation {
   validUntil   DateTime?
   notes        String?
   status       String   @default("OPEN") // OPEN | ACCEPTED | CONVERTED | EXPIRED | REJECTED
-  subTotal     Float    @default(0)
-  cgstTotal    Float    @default(0)
-  sgstTotal    Float    @default(0)
-  igstTotal    Float    @default(0)
-  taxTotal     Float    @default(0)
-  discount     Float    @default(0)
-  roundOff     Float    @default(0)
-  grandTotal   Float    @default(0)
+  subTotalPaise   Int   @default(0)
+  cgstTotalPaise  Int   @default(0)
+  sgstTotalPaise  Int   @default(0)
+  igstTotalPaise  Int   @default(0)
+  cessTotalPaise  Int   @default(0)
+  taxTotalPaise   Int   @default(0)
+  discountPaise   Int   @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int   @default(0)
+  grandTotalPaise Int   @default(0)
   isInterState Boolean  @default(false)
+  reverseCharge Boolean @default(false)
+  placeOfSupply String?
   convertedInvoiceId String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -350,18 +640,146 @@ model QuotationItem {
   hsn           String?
   quantity      Float
   unit          String  @default("NOS")
-  rate          Float
-  discount      Float   @default(0)
-  taxableAmount Float   @default(0)
+  ratePaise     Int
+  discountPaise Int     @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int     @default(0)
   gstRate       Float   @default(0)
-  cgst          Float   @default(0)
-  sgst          Float   @default(0)
-  igst          Float   @default(0)
-  total         Float   @default(0)
+  cessRate      Float   @default(0)
+  cessPerUnitPaise Int  @default(0)
+  cgstPaise     Int     @default(0)
+  sgstPaise     Int     @default(0)
+  igstPaise     Int     @default(0)
+  cessPaise     Int     @default(0)
+  totalPaise    Int     @default(0)
+  supplyType    String  @default("TAXABLE")
+  pricingMode   String  @default("EXCLUSIVE")
 
   quotationId String
   quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   item        Item?     @relation(fields: [itemId], references: [id])
+
+  @@index([quotationId])
+}
+
+// ======================== ORDERS & GOODS MOVEMENT ========================
+//
+// Sales order, delivery challan, purchase order and goods receipt note share an
+// identical structure: a party, priced lines, totals, a status, and links to the
+// document they came from or became. Modelling them as four pairs of models
+// would be ~8 near-duplicate models and four copies of every query.
+//
+// A single model with a `docType` discriminator keeps one code path, so a fix to
+// (say) apportioned discounts applies to all four at once.
+//
+// LEDGER TREATMENT
+// ----------------
+// None of these post to the ledger:
+//   - Sales order and purchase order are COMMITMENTS. No goods have moved and no
+//     money is owed, so there is nothing to post.
+//   - Delivery challan and GRN move STOCK only. This is consistent with the
+//     periodic-inventory approach the posting rules already use: purchases are
+//     debited to the Purchases expense ledger, not to Stock-in-Hand, so stock
+//     quantities are tracked outside the ledger and closing stock is a year-end
+//     entry. A GRN therefore creates no liability until its purchase invoice is
+//     booked - which is correct, and is why "goods received not invoiced" is a
+//     reconciliation item rather than a missing posting.
+//
+// The ledger entry happens when the document is converted to an invoice or a
+// purchase.
+model OrderDocument {
+  id      String @id @default(cuid())
+  // SALES_ORDER | DELIVERY_CHALLAN | PURCHASE_ORDER | GRN
+  docType String
+  number  String
+  date    DateTime @default(now())
+  // SO/PO: when delivery is expected. DC/GRN: unused.
+  expectedDate DateTime?
+  // OPEN | PARTIAL | COMPLETED | CANCELLED
+  status  String @default("OPEN")
+  notes   String?
+  // Buyer's PO number on a sales order; supplier's DC number on a GRN.
+  externalRef String?
+
+  // Goods-movement fields. GST requires these on a delivery challan when goods
+  // move without an invoice (job work, approval basis, branch transfer).
+  transporterName String?
+  vehicleNumber   String?
+  // Reason goods are moving without an invoice, e.g. JOB_WORK | APPROVAL |
+  // BRANCH_TRANSFER | REPLACEMENT | OTHER
+  movementReason  String?
+
+  subTotalPaise   Int @default(0)
+  cgstTotalPaise  Int @default(0)
+  sgstTotalPaise  Int @default(0)
+  igstTotalPaise  Int @default(0)
+  cessTotalPaise  Int @default(0)
+  taxTotalPaise   Int @default(0)
+  discountPaise   Int @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int @default(0)
+  grandTotalPaise Int @default(0)
+  isInterState Boolean @default(false)
+  reverseCharge Boolean @default(false)
+  placeOfSupply String?
+
+  // The document this was raised from (DC from a sales order, GRN from a PO).
+  sourceDocumentId String?
+  // What it became: an Invoice id for SO/DC, a Purchase id for PO/GRN.
+  convertedToId    String?
+  convertedAt      DateTime?
+
+  godownId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  partyId   String
+  party     Party   @relation(fields: [partyId], references: [id])
+  godown    Godown? @relation(fields: [godownId], references: [id])
+
+  sourceDocument OrderDocument?  @relation("DocumentChain", fields: [sourceDocumentId], references: [id])
+  derivedDocuments OrderDocument[] @relation("DocumentChain")
+
+  items OrderDocumentItem[]
+
+  @@unique([companyId, number])
+  @@index([companyId, docType, date])
+  @@index([companyId, docType, status])
+}
+
+model OrderDocumentItem {
+  id       String  @id @default(cuid())
+  itemId   String?
+  itemName String
+  hsn      String?
+  quantity Float
+  // How much of this line has been delivered (SO/DC) or received (PO/GRN).
+  // Lets a single order be fulfilled across several despatches.
+  fulfilledQuantity Float @default(0)
+  unit     String  @default("NOS")
+  ratePaise     Int
+  discountPaise Int @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int @default(0)
+  gstRate    Float @default(0)
+  cessRate   Float @default(0)
+  cessPerUnitPaise Int @default(0)
+  cgstPaise  Int @default(0)
+  sgstPaise  Int @default(0)
+  igstPaise  Int @default(0)
+  cessPaise  Int @default(0)
+  totalPaise Int @default(0)
+  supplyType String @default("TAXABLE")
+  pricingMode String @default("EXCLUSIVE")
+
+  documentId String
+  document   OrderDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  item       Item?         @relation(fields: [itemId], references: [id])
+
+  @@index([documentId])
 }
 
 model CreditNote {
@@ -372,15 +790,19 @@ model CreditNote {
   reason       String?
   notes        String?
   originalRef  String?  // original invoice/purchase number
-  subTotal     Float    @default(0)
-  cgstTotal    Float    @default(0)
-  sgstTotal    Float    @default(0)
-  igstTotal    Float    @default(0)
-  taxTotal     Float    @default(0)
-  discount     Float    @default(0)
-  roundOff     Float    @default(0)
-  grandTotal   Float    @default(0)
+  subTotalPaise   Int   @default(0)
+  cgstTotalPaise  Int   @default(0)
+  sgstTotalPaise  Int   @default(0)
+  igstTotalPaise  Int   @default(0)
+  cessTotalPaise  Int   @default(0)
+  taxTotalPaise   Int   @default(0)
+  discountPaise   Int   @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int   @default(0)
+  grandTotalPaise Int   @default(0)
   isInterState Boolean  @default(false)
+  reverseCharge Boolean @default(false)
+  placeOfSupply String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -402,18 +824,26 @@ model CreditNoteItem {
   hsn           String?
   quantity      Float
   unit          String  @default("NOS")
-  rate          Float
-  discount      Float   @default(0)
-  taxableAmount Float   @default(0)
+  ratePaise     Int
+  discountPaise Int     @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int     @default(0)
   gstRate       Float   @default(0)
-  cgst          Float   @default(0)
-  sgst          Float   @default(0)
-  igst          Float   @default(0)
-  total         Float   @default(0)
+  cessRate      Float   @default(0)
+  cessPerUnitPaise Int  @default(0)
+  cgstPaise     Int     @default(0)
+  sgstPaise     Int     @default(0)
+  igstPaise     Int     @default(0)
+  cessPaise     Int     @default(0)
+  totalPaise    Int     @default(0)
+  supplyType    String  @default("TAXABLE")
+  pricingMode   String  @default("EXCLUSIVE")
 
   creditNoteId String
   creditNote   CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
   item         Item?      @relation(fields: [itemId], references: [id])
+
+  @@index([creditNoteId])
 }
 
 model Expense {
@@ -422,10 +852,12 @@ model Expense {
   date        DateTime @default(now())
   category    String   @default("General")
   paymentMode String   @default("CASH")
-  amount      Float    @default(0)
+  amountPaise Int      @default(0)
   gstRate     Float    @default(0)
-  taxAmount   Float    @default(0)
-  total       Float    @default(0)
+  taxPaise    Int      @default(0)
+  totalPaise  Int      @default(0)
+  // Whether input tax credit can be claimed on this expense.
+  itcEligible Boolean  @default(false)
   reference   String?
   notes       String?
   createdAt   DateTime @default(now())
@@ -456,6 +888,10 @@ model Godown {
   items          Item[]
   transfersFrom  StockTransfer[] @relation("TransferFrom")
   transfersTo    StockTransfer[] @relation("TransferTo")
+  orderDocuments OrderDocument[]
+  stockMovements StockMovement[]
+  stockAdjustments StockAdjustment[]
+  physicalCounts PhysicalCount[]
 
   @@index([companyId])
 }
@@ -504,9 +940,9 @@ model BankTransaction {
   date         DateTime
   description  String
   reference    String?
-  debit        Float    @default(0)
-  credit       Float    @default(0)
-  balance      Float    @default(0)
+  debitPaise   Int      @default(0)
+  creditPaise  Int      @default(0)
+  balancePaise Int      @default(0)
   isMatched    Boolean  @default(false)
   matchedPaymentId String?
   createdAt    DateTime @default(now())
@@ -523,7 +959,7 @@ model Budget {
   name      String
   category  String   // Sales | Purchases | Expenses | Rent | Salaries etc.
   period    String   // "2025-04" for monthly or "2025-Q1" etc.
-  amount    Float    @default(0)
+  amountPaise Int    @default(0)
   createdAt DateTime @default(now())
 
   companyId String
@@ -551,6 +987,435 @@ model AuditLog {
 }
 
 
+// ======================== DOCUMENT NUMBERING ========================
+//
+// Replaces the previous read-latest-and-increment approach, which raced under
+// concurrency because the read happened outside the enclosing transaction.
+// This row is updated inside the same transaction that creates the document,
+// so allocation is atomic.
+//
+// Keyed on financialYear because GST requires a series that restarts each year.
+model DocumentCounter {
+  id            String @id @default(cuid())
+  documentType  String // INVOICE | PURCHASE | PAYMENT | QUOTATION | CREDIT | DEBIT | EXPENSE | JOURNAL
+  financialYear String // "2025-26"
+  prefix        String
+  lastNumber    Int    @default(0)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, documentType, financialYear])
+}
+
+// ======================== FINANCIAL YEAR / PERIOD LOCK ========================
+//
+// Once a return is filed, the entries behind it must not change, or the books
+// stop matching the return.
+model FinancialYear {
+  id         String   @id @default(cuid())
+  label      String   // "2025-26"
+  startDate  DateTime // 1 April
+  endDate    DateTime // 31 March
+  isClosed   Boolean  @default(false)
+  // No entry may be created or edited on or before this date.
+  lockedTill DateTime?
+  createdAt  DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, label])
+  @@index([companyId, startDate])
+}
+
+
+// ======================== DOUBLE-ENTRY ACCOUNTING ========================
+//
+// Ledger groups nest, as in Tally. `nature` determines which financial
+// statement a balance lands in and which sign is "normal".
+model LedgerGroup {
+  id       String  @id @default(cuid())
+  name     String
+  nature   String  // ASSET | LIABILITY | INCOME | EXPENSE | EQUITY
+  parentId String?
+  // System groups are created by the seed and cannot be deleted, because
+  // posting rules reference them by name.
+  isSystem Boolean @default(false)
+  sortOrder Int    @default(0)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  parent   LedgerGroup?  @relation("GroupTree", fields: [parentId], references: [id])
+  children LedgerGroup[] @relation("GroupTree")
+  ledgers  Ledger[]
+
+  @@unique([companyId, name])
+  @@index([companyId, nature])
+}
+
+model Ledger {
+  id                  String  @id @default(cuid())
+  name                String
+  code                String?
+  openingBalancePaise Int     @default(0)
+  // Opening balances need a side: a debtor opens debit, a creditor opens credit.
+  openingIsDebit      Boolean @default(true)
+  isSystem            Boolean @default(false)
+
+  // A party gets exactly one control ledger, so its ledger balance and its
+  // outstanding always agree.
+  partyId String? @unique
+
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  groupId   String
+  group     LedgerGroup @relation(fields: [groupId], references: [id])
+  party     Party?      @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  lines JournalEntryLine[]
+
+  @@unique([companyId, name])
+  @@index([companyId, groupId])
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  voucherType String   // SALES | PURCHASE | RECEIPT | PAYMENT | JOURNAL | CONTRA | CREDIT_NOTE | DEBIT_NOTE | EXPENSE | OPENING
+  voucherNo   String
+  date        DateTime
+  narration   String?
+
+  // Link back to the document that produced this posting, so a report figure
+  // can drill through to its source.
+  sourceType String? // "Invoice" | "Purchase" | "Payment" | "Expense" | "CreditNote"
+  sourceId   String?
+
+  isLocked  Boolean  @default(false)
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  lines JournalEntryLine[]
+
+  @@unique([companyId, voucherType, voucherNo])
+  @@index([companyId, date])
+  @@index([companyId, sourceType, sourceId])
+}
+
+model JournalEntryLine {
+  id       String @id @default(cuid())
+  // Exactly one of these is non-zero. The sum of debits must equal the sum of
+  // credits for every entry - enforced in src/lib/accounting.ts inside the
+  // transaction that writes the entry. Integers make that check exact.
+  debitPaise  Int @default(0)
+  creditPaise Int @default(0)
+  narration   String?
+
+  entryId  String
+  entry    JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  ledgerId String
+  ledger   Ledger       @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@index([ledgerId])
+}
+
+
+// ======================== NOTIFICATIONS ========================
+//
+// In-app notifications. Kept as first-class rows rather than derived on the fly
+// because "has the user seen this" is state, and because a reminder must not be
+// regenerated every time a page loads.
+model Notification {
+  id       String @id @default(cuid())
+  // INVOICE_OVERDUE | PAYMENT_RECEIVED | LOW_STOCK | GST_DUE | GRN_NOT_INVOICED
+  // | BOOKS_UNBALANCED | SUBSCRIPTION | AI_BUDGET | SYSTEM
+  kind     String
+  // INFO | WARNING | CRITICAL — drives colour and ordering, not behaviour.
+  severity String @default("INFO")
+  title    String
+  body     String
+  // Where clicking it should go.
+  actionUrl String?
+
+  readAt      DateTime?
+  dismissedAt DateTime?
+
+  // Stable key that stops the same reminder being re-created on every run,
+  // e.g. "INVOICE_OVERDUE:<invoiceId>:<bucket>". Unique per company.
+  dedupeKey String
+
+  // Optional link back to the record that caused it.
+  sourceType String?
+  sourceId   String?
+
+  createdAt DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Null means "everyone in the company".
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, dedupeKey])
+  @@index([companyId, readAt, createdAt])
+  @@index([companyId, kind])
+}
+
+// Per-company delivery preferences, so a tenant is not forced into channels they
+// have not paid for or do not want.
+model NotificationSetting {
+  id   String @id @default(cuid())
+  kind String
+
+  inApp    Boolean @default(true)
+  email    Boolean @default(false)
+  whatsapp Boolean @default(false)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, kind])
+}
+
+// Log of every outbound message attempt.
+//
+// Exists so "did the customer get the reminder?" has an answer. Without a log,
+// email delivery is unfalsifiable and every dispute is a guess.
+model MessageLog {
+  id      String @id @default(cuid())
+  channel String // EMAIL | WHATSAPP | SMS
+  // SENT | FAILED | SKIPPED | QUEUED
+  status  String @default("QUEUED")
+
+  recipient String
+  subject   String?
+  // Body is truncated: full invoice text would bloat the table and can contain
+  // customer data we have no reason to retain twice.
+  preview   String?
+  provider  String  @default("mock")
+  error     String?
+
+  sourceType String?
+  sourceId   String?
+
+  createdAt DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, channel, createdAt])
+  @@index([companyId, status])
+}
+
+// Tenant-configured outbound webhooks, so a business can push events into their
+// own systems.
+model OutboundWebhook {
+  id     String  @id @default(cuid())
+  url    String
+  // Comma-separated event names, or "*" for all.
+  events String  @default("*")
+  // Used to sign the payload so the receiver can verify it came from us.
+  secret String
+  active Boolean @default(true)
+
+  lastStatus     Int?
+  lastAttemptAt  DateTime?
+  consecutiveFailures Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  deliveries WebhookDelivery[]
+
+  @@index([companyId, active])
+}
+
+model WebhookDelivery {
+  id         String @id @default(cuid())
+  eventType  String
+  payload    String
+  // PENDING | DELIVERED | FAILED
+  status     String @default("PENDING")
+  statusCode Int?
+  error      String?
+  attempts   Int    @default(0)
+
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+
+  webhookId String
+  webhook   OutboundWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, status])
+}
+
+// ======================== PAYMENTS & BILLING ========================
+//
+// A payment link a customer can pay online, which then records a receipt against
+// the invoice automatically.
+model PaymentLink {
+  id     String @id @default(cuid())
+  // Short, unguessable public token used in the URL. NOT the row id, so the
+  // internal id is never exposed and links cannot be enumerated by counting.
+  token  String @unique
+  // PENDING | PAID | EXPIRED | CANCELLED
+  status String @default("PENDING")
+
+  amountPaise Int
+  // Set once paid, so a partial gateway settlement is visible rather than
+  // silently treated as full payment.
+  paidPaise   Int @default(0)
+
+  provider          String  @default("mock") // mock | razorpay | stripe
+  providerOrderId   String?
+  providerPaymentId String?
+
+  expiresAt DateTime?
+  paidAt    DateTime?
+  // The receipt created when payment landed, so the link and the books agree.
+  paymentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([invoiceId])
+}
+
+// Gateway webhook deliveries.
+//
+// EXISTS FOR IDEMPOTENCY. Gateways retry until they get a 2xx, and they can
+// deliver the same event more than once even after success. Without a record of
+// what has been processed, a retry would record the same customer payment twice.
+// The unique constraint on (provider, eventId) is the guard.
+model WebhookEvent {
+  id         String @id @default(cuid())
+  provider   String
+  // The gateway's own event id.
+  eventId    String
+  eventType  String
+  // PROCESSED | IGNORED | FAILED
+  status     String @default("PROCESSED")
+  // Raw payload, retained for dispute investigation.
+  payload    String
+  error      String?
+  receivedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([provider, eventType, receivedAt])
+}
+
+// A tenant's subscription to a plan.
+model Subscription {
+  id     String @id @default(cuid())
+  planId String // FREE | BASIC | PREMIUM
+  // TRIALING | ACTIVE | PAST_DUE | CANCELLED | EXPIRED
+  status String @default("TRIALING")
+  // MONTHLY | ANNUAL
+  interval String @default("MONTHLY")
+
+  amountPaise Int @default(0)
+  // GST is chargeable on SaaS subscriptions, so it is stored rather than
+  // recomputed at display time.
+  taxPaise    Int @default(0)
+  totalPaise  Int @default(0)
+
+  couponCode      String?
+  discountPaise   Int     @default(0)
+
+  provider               String? // razorpay | stripe | mock
+  providerSubscriptionId String?
+  providerCustomerId     String?
+
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelledAt        DateTime?
+  // Number of consecutive failed charges, used to drive dunning.
+  failedAttempts     Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  billingInvoices BillingInvoice[]
+
+  @@index([status])
+}
+
+// Our own invoice to the tenant for their subscription. Distinct from `Invoice`,
+// which is the tenant's invoice to THEIR customer.
+model BillingInvoice {
+  id     String @id @default(cuid())
+  number String @unique
+  // DRAFT | PAID | UNPAID | FAILED | REFUNDED
+  status String @default("UNPAID")
+
+  amountPaise   Int
+  taxPaise      Int @default(0)
+  totalPaise    Int
+  gstRate       Float @default(18)
+  // Place of supply drives whether we charge CGST+SGST or IGST on our own bill.
+  placeOfSupply String?
+
+  periodStart DateTime
+  periodEnd   DateTime
+  paidAt      DateTime?
+
+  provider          String?
+  providerPaymentId String?
+  failureReason     String?
+
+  createdAt DateTime @default(now())
+
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([status])
+}
+
+// ======================== AI USAGE METERING ========================
+//
+// AI is the only cost that scales with usage, so it must be attributable per
+// tenant and enforceable against a budget BEFORE the call is made.
+model AiUsageLog {
+  id           String   @id @default(cuid())
+  feature      String   // OCR | ASSISTANT | CATEGORISE | FORECAST | SUMMARY
+  provider     String   // mock | openai | gemini | anthropic | local
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costPaise    Int      @default(0)
+  cacheHit     Boolean  @default(false)
+  userId       String?
+  createdAt    DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([companyId, feature])
+}
+
+
 // ======================== PLATFORM / SUPER-ADMIN ========================
 
 // Key-value store for global site settings (contact, social, announcement, etc.)
@@ -567,7 +1432,10 @@ model Coupon {
   code           String    @unique
   description    String?
   type           String    @default("PERCENT") // PERCENT | FLAT
-  value          Float     @default(0)
+  // Used when type = PERCENT. A percentage, not money.
+  percentOff     Float     @default(0)
+  // Used when type = FLAT. Money, in paise.
+  flatOffPaise   Int       @default(0)
   appliesToPlan  String?   // BASIC | PREMIUM | null = any paid plan
   maxRedemptions Int?      // null = unlimited
   timesRedeemed  Int       @default(0)
@@ -581,8 +1449,8 @@ model PlanSetting {
   id           String   @id // FREE | BASIC | PREMIUM
   name         String
   tagline      String?
-  priceMonthly Float    @default(0)
-  priceAnnual  Float    @default(0)
+  priceMonthlyPaise Int  @default(0)
+  priceAnnualPaise  Int  @default(0)
   invoiceLimit Int      @default(-1) // -1 = unlimited
   userLimit    Int      @default(1)
   active       Boolean  @default(true)

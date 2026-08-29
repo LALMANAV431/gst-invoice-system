@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { animate, useInView } from "framer-motion";
-import { formatINR, formatNumber } from "@/lib/utils";
+import { formatPaise, formatNumber } from "@/lib/utils";
 
 export default function AnimatedCounter({
   value,
@@ -30,7 +30,7 @@ export default function AnimatedCounter({
 
   const text =
     format === "inr"
-      ? formatINR(display)
+      ? formatPaise(display)
       : format === "int"
       ? formatNumber(display, 0)
       : formatNumber(display, 2);

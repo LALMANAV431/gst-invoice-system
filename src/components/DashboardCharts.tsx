@@ -12,7 +12,7 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/utils";
 
 const BRAND = "#1f3df5";
 
@@ -43,7 +43,7 @@ export function RevenueAreaChart({
           tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : `${v}`)}
         />
         <Tooltip
-          formatter={(v: number) => formatINR(v)}
+          formatter={(v: number) => formatPaise(v)}
           contentStyle={{
             borderRadius: 12,
             border: "1px solid #e2e8f0",
@@ -101,7 +101,7 @@ export function CategoryDonut({ data }: { data: { name: string; value: number }[
           ))}
         </Pie>
         <Tooltip
-          formatter={(v: number) => formatINR(v)}
+          formatter={(v: number) => formatPaise(v)}
           contentStyle={{
             borderRadius: 12,
             border: "1px solid #e2e8f0",

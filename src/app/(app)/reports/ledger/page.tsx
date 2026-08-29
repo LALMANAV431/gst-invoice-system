@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -43,9 +43,9 @@ export default async function LedgerPage({
       db.creditNote.findMany({ where: { companyId, partyId: party.id } }),
     ]);
 
-    if (party.openingBalance > 0) {
-      if (party.balanceType === "RECEIVABLE") openingDebit = party.openingBalance;
-      else openingCredit = party.openingBalance;
+    if (party.openingBalancePaise > 0) {
+      if (party.balanceType === "RECEIVABLE") openingDebit = party.openingBalancePaise;
+      else openingCredit = party.openingBalancePaise;
     }
 
     rows = [
@@ -53,7 +53,7 @@ export default async function LedgerPage({
         date: i.date,
         particulars: "Sales Invoice",
         voucher: i.number,
-        debit: i.grandTotal,
+        debit: i.grandTotalPaise,
         credit: 0,
       })),
       ...purchases.map((p) => ({
@@ -61,21 +61,21 @@ export default async function LedgerPage({
         particulars: "Purchase Bill",
         voucher: p.number,
         debit: 0,
-        credit: p.grandTotal,
+        credit: p.grandTotalPaise,
       })),
       ...payments.map((p) => ({
         date: p.date,
         particulars: p.type === "RECEIVED" ? "Receipt" : "Payment",
         voucher: p.number,
-        debit: p.type === "PAID" ? p.amount : 0,
-        credit: p.type === "RECEIVED" ? p.amount : 0,
+        debit: p.type === "PAID" ? p.amountPaise : 0,
+        credit: p.type === "RECEIVED" ? p.amountPaise : 0,
       })),
       ...notes.map((n) => ({
         date: n.date,
         particulars: n.kind === "CREDIT" ? "Credit Note" : "Debit Note",
         voucher: n.number,
-        debit: n.kind === "DEBIT" ? n.grandTotal : 0,
-        credit: n.kind === "CREDIT" ? n.grandTotal : 0,
+        debit: n.kind === "DEBIT" ? n.grandTotalPaise : 0,
+        credit: n.kind === "CREDIT" ? n.grandTotalPaise : 0,
       })),
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }
@@ -120,7 +120,7 @@ export default async function LedgerPage({
             <div className="text-right">
               <p className="text-xs text-slate-500 uppercase">Closing Balance</p>
               <p className={`text-xl font-bold ${closing >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                {formatINR(Math.abs(closing))} {closing >= 0 ? "Dr" : "Cr"}
+                {formatPaise(Math.abs(closing))} {closing >= 0 ? "Dr" : "Cr"}
               </p>
             </div>
           </div>
@@ -142,10 +142,10 @@ export default async function LedgerPage({
                   <td colSpan={3} className="font-medium">
                     Opening Balance
                   </td>
-                  <td className="text-right">{openingDebit ? formatINR(openingDebit) : "—"}</td>
-                  <td className="text-right">{openingCredit ? formatINR(openingCredit) : "—"}</td>
+                  <td className="text-right">{openingDebit ? formatPaise(openingDebit) : "—"}</td>
+                  <td className="text-right">{openingCredit ? formatPaise(openingCredit) : "—"}</td>
                   <td className="text-right font-medium">
-                    {formatINR(Math.abs(running))} {running >= 0 ? "Dr" : "Cr"}
+                    {formatPaise(Math.abs(running))} {running >= 0 ? "Dr" : "Cr"}
                   </td>
                 </tr>
                 {rows.map((r, i) => {
@@ -155,20 +155,20 @@ export default async function LedgerPage({
                       <td>{formatDate(r.date)}</td>
                       <td>{r.particulars}</td>
                       <td>{r.voucher}</td>
-                      <td className="text-right">{r.debit ? formatINR(r.debit) : "—"}</td>
-                      <td className="text-right">{r.credit ? formatINR(r.credit) : "—"}</td>
+                      <td className="text-right">{r.debit ? formatPaise(r.debit) : "—"}</td>
+                      <td className="text-right">{r.credit ? formatPaise(r.credit) : "—"}</td>
                       <td className="text-right font-medium">
-                        {formatINR(Math.abs(running))} {running >= 0 ? "Dr" : "Cr"}
+                        {formatPaise(Math.abs(running))} {running >= 0 ? "Dr" : "Cr"}
                       </td>
                     </tr>
                   );
                 })}
                 <tr className="border-t-2 border-slate-200 font-bold">
                   <td colSpan={3}>Total</td>
-                  <td className="text-right">{formatINR(totalDebit)}</td>
-                  <td className="text-right">{formatINR(totalCredit)}</td>
+                  <td className="text-right">{formatPaise(totalDebit)}</td>
+                  <td className="text-right">{formatPaise(totalCredit)}</td>
                   <td className="text-right">
-                    {formatINR(Math.abs(closing))} {closing >= 0 ? "Dr" : "Cr"}
+                    {formatPaise(Math.abs(closing))} {closing >= 0 ? "Dr" : "Cr"}
                   </td>
                 </tr>
               </tbody>

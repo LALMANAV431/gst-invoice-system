@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { hasFeature, planActive } from "@/lib/plan";
+import { estimateCostRate, recordStockMovement } from "@/server/stock";
 
 export async function GET() {
   const ctx = await getCurrentUserAndCompany();
@@ -45,26 +46,38 @@ export async function POST(req: Request) {
       },
     });
 
-    // Record stock movements
-    await tx.stockMovement.create({
-      data: {
-        companyId: ctx.company!.id,
-        itemId,
-        type: "OUT",
-        quantity: qty,
-        reference: `Transfer to ${toGodownId}`,
-        notes: `Stock transfer: ${notes || ""}`,
-      },
+    // A transfer is one movement out of the source godown and one into the
+    // destination. Company-level quantity is unchanged, so the pair must use the
+    // SAME cost: valuing the receipt independently would create or destroy value
+    // by moving goods between our own shelves.
+    const ratePaise = await estimateCostRate(tx, ctx.company!.id, itemId);
+    const fromName = (await tx.godown.findUnique({ where: { id: fromGodownId }, select: { name: true } }))?.name ?? "godown";
+    const toName = (await tx.godown.findUnique({ where: { id: toGodownId }, select: { name: true } }))?.name ?? "godown";
+
+    await recordStockMovement(tx, {
+      companyId: ctx.company!.id,
+      itemId,
+      direction: "OUT",
+      quantity: qty,
+      date: created.date,
+      reference: `Transfer to ${toName}`,
+      notes: `Stock transfer: ${notes || ""}`,
+      sourceType: "TRANSFER",
+      sourceId: created.id,
+      godownId: fromGodownId,
     });
-    await tx.stockMovement.create({
-      data: {
-        companyId: ctx.company!.id,
-        itemId,
-        type: "IN",
-        quantity: qty,
-        reference: `Transfer from ${fromGodownId}`,
-        notes: `Stock transfer: ${notes || ""}`,
-      },
+    await recordStockMovement(tx, {
+      companyId: ctx.company!.id,
+      itemId,
+      direction: "IN",
+      quantity: qty,
+      date: created.date,
+      reference: `Transfer from ${fromName}`,
+      notes: `Stock transfer: ${notes || ""}`,
+      sourceType: "TRANSFER",
+      sourceId: created.id,
+      godownId: toGodownId,
+      ratePaise,
     });
 
     return created;

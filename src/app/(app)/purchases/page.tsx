@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { Plus, Eye } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 
@@ -70,9 +70,9 @@ export default async function PurchasesPage() {
                     <td className="text-xs">{p.vendorBillNo || "—"}</td>
                     <td>{formatDate(p.date)}</td>
                     <td>{p.party.name}</td>
-                    <td className="text-right">{formatINR(p.subTotal)}</td>
-                    <td className="text-right">{formatINR(p.taxTotal)}</td>
-                    <td className="text-right font-semibold">{formatINR(p.grandTotal)}</td>
+                    <td className="text-right">{formatPaise(p.subTotalPaise)}</td>
+                    <td className="text-right">{formatPaise(p.taxTotalPaise)}</td>
+                    <td className="text-right font-semibold">{formatPaise(p.grandTotalPaise)}</td>
                     <td>
                       {p.status === "PAID" ? (
                         <span className="badge-green">Paid</span>

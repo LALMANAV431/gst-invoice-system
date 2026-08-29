@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { recordOpeningStock } from "@/server/services/inventory.service";
 
 // Bulk import items from parsed CSV rows.
-// Expected keys (case-insensitive): name, sku, hsn, barcode, unit, salePrice, purchasePrice, gstRate, openingStock, lowStockAlert
+// Expected keys (case-insensitive): name, sku, hsn, barcode, unit, salePricePaise, purchasePricePaise, gstRate, openingStock, lowStockAlert
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -32,21 +33,38 @@ export async function POST(req: Request) {
     }
     try {
       const opening = parseFloat(norm(r, "openingstock", "stock", "qty")) || 0;
-      await db.item.create({
-        data: {
-          companyId: ctx.company.id,
-          name,
-          sku: (norm(r, "sku", "code") || "")?.toString() || null,
-          hsn: (norm(r, "hsn") || "")?.toString() || null,
-          barcode: (norm(r, "barcode", "ean", "upc") || "")?.toString() || null,
-          unit: (norm(r, "unit") || "NOS")?.toString() || "NOS",
-          salePrice: parseFloat(norm(r, "saleprice", "sellingprice", "mrp", "rate")) || 0,
-          purchasePrice: parseFloat(norm(r, "purchaseprice", "costprice", "cost")) || 0,
-          gstRate: parseFloat(norm(r, "gstrate", "gst", "tax")) || 0,
-          openingStock: opening,
-          currentStock: opening,
-          lowStockAlert: parseFloat(norm(r, "lowstockalert", "reorder", "minstock")) || 0,
-        },
+      const purchasePricePaise = parseFloat(norm(r, "purchaseprice", "costprice", "cost")) || 0;
+      // Imported opening stock is valued at the imported cost price, and gets a
+      // real OPENING movement so valuation does not have to infer it.
+      const openingRatePaise =
+        parseFloat(norm(r, "openingrate", "openingcost")) || purchasePricePaise;
+
+      await db.$transaction(async (tx) => {
+        const item = await tx.item.create({
+          data: {
+            companyId: ctx.company!.id,
+            name,
+            sku: (norm(r, "sku", "code") || "")?.toString() || null,
+            hsn: (norm(r, "hsn") || "")?.toString() || null,
+            barcode: (norm(r, "barcode", "ean", "upc") || "")?.toString() || null,
+            unit: (norm(r, "unit") || "NOS")?.toString() || "NOS",
+            salePricePaise: parseFloat(norm(r, "saleprice", "sellingprice", "mrp", "rate")) || 0,
+            purchasePricePaise,
+            gstRate: parseFloat(norm(r, "gstrate", "gst", "tax")) || 0,
+            openingStock: opening,
+            openingRatePaise,
+            currentStock: opening,
+            lowStockAlert: parseFloat(norm(r, "lowstockalert", "reorder", "minstock")) || 0,
+          },
+        });
+        if (opening !== 0) {
+          await recordOpeningStock(tx, {
+            companyId: ctx.company!.id,
+            itemId: item.id,
+            quantity: opening,
+            ratePaise: openingRatePaise,
+          });
+        }
       });
       created++;
     } catch (e: any) {

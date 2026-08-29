@@ -1,3 +1,5 @@
+import { Paise, toPaise } from "./money";
+
 export type PlanId = "FREE" | "BASIC" | "PREMIUM";
 
 export type Feature =
@@ -17,7 +19,19 @@ export type Feature =
 export type PlanConfig = {
   id: PlanId;
   name: string;
-  price: number; // monthly in INR
+  /**
+   * Monthly price in integer PAISE.
+   *
+   * This was `price: number // monthly in INR`, while `getEffectivePlans()`
+   * overwrote it with `PlanSetting.priceMonthlyPaise` from the database. Every
+   * consumer then rendered it with `formatPaise()`. So the figure was correct
+   * only once PlanSetting rows existed: a fresh install, which falls back to the
+   * defaults below, advertised the Basic plan at Rs 2.99 and Premium at Rs 9.99.
+   * Named for its unit now, so the two sources cannot disagree again.
+   */
+  priceMonthlyPaise: Paise;
+  /** Annual price in integer paise. */
+  priceAnnualPaise: Paise;
   tagline: string;
   invoiceLimit: number; // per month; Infinity for unlimited
   userLimit: number;
@@ -29,7 +43,8 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   FREE: {
     id: "FREE",
     name: "Free",
-    price: 0,
+    priceMonthlyPaise: 0,
+    priceAnnualPaise: 0,
     tagline: "For freelancers & new businesses",
     invoiceLimit: 20,
     userLimit: 1,
@@ -38,7 +53,8 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   BASIC: {
     id: "BASIC",
     name: "Basic",
-    price: 299,
+    priceMonthlyPaise: toPaise(299),
+    priceAnnualPaise: toPaise(2990),
     tagline: "For growing small businesses",
     invoiceLimit: Infinity,
     userLimit: 3,
@@ -55,7 +71,8 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   PREMIUM: {
     id: "PREMIUM",
     name: "Premium",
-    price: 999,
+    priceMonthlyPaise: toPaise(999),
+    priceAnnualPaise: toPaise(9990),
     tagline: "Full Tally/Busy replacement",
     invoiceLimit: Infinity,
     userLimit: 25,
@@ -118,11 +135,11 @@ import { db } from "./db";
  * Merge DB PlanSetting overrides on top of the hardcoded PLANS defaults.
  * Lets the SaaS owner edit prices/limits from the admin dashboard.
  */
-export async function getEffectivePlans(): Promise<Record<PlanId, PlanConfig & { priceAnnual: number }>> {
-  const defaults: Record<PlanId, PlanConfig & { priceAnnual: number }> = {
-    FREE: { ...PLANS.FREE, priceAnnual: 0 },
-    BASIC: { ...PLANS.BASIC, priceAnnual: 2990 },
-    PREMIUM: { ...PLANS.PREMIUM, priceAnnual: 9990 },
+export async function getEffectivePlans(): Promise<Record<PlanId, PlanConfig>> {
+  const defaults: Record<PlanId, PlanConfig> = {
+    FREE: { ...PLANS.FREE },
+    BASIC: { ...PLANS.BASIC },
+    PREMIUM: { ...PLANS.PREMIUM },
   };
   try {
     const rows = await db.planSetting.findMany();
@@ -133,8 +150,9 @@ export async function getEffectivePlans(): Promise<Record<PlanId, PlanConfig & {
         ...defaults[id],
         name: r.name ?? defaults[id].name,
         tagline: r.tagline ?? defaults[id].tagline,
-        price: r.priceMonthly,
-        priceAnnual: r.priceAnnual,
+        // Both columns are already paise, matching the field names.
+        priceMonthlyPaise: r.priceMonthlyPaise,
+        priceAnnualPaise: r.priceAnnualPaise,
         invoiceLimit: r.invoiceLimit < 0 ? Infinity : r.invoiceLimit,
         userLimit: r.userLimit,
       };

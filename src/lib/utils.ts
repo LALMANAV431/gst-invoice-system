@@ -5,6 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Format a RUPEE amount.
+ *
+ * Nearly everything in this codebase now stores integer paise — use
+ * `formatPaise()` for those. This remains only for the few values that are
+ * genuinely rupees (user-typed form inputs before conversion).
+ */
 export function formatINR(amount: number): string {
   if (isNaN(amount)) return "₹0.00";
   return new Intl.NumberFormat("en-IN", {
@@ -83,21 +90,19 @@ export function numberToWords(num: number): string {
   return str + " Only";
 }
 
+// ---------------------------------------------------------------------------
 // GST helpers
-export function calcLineGST(opts: {
-  quantity: number;
-  rate: number;
-  discount?: number;
-  gstRate: number;
-  isInterState: boolean;
-}) {
-  const { quantity, rate, discount = 0, gstRate, isInterState } = opts;
-  const gross = quantity * rate;
-  const taxableAmount = Math.max(0, gross - discount);
-  const taxAmount = +(taxableAmount * (gstRate / 100)).toFixed(2);
-  const cgst = isInterState ? 0 : +(taxAmount / 2).toFixed(2);
-  const sgst = isInterState ? 0 : +(taxAmount - cgst).toFixed(2);
-  const igst = isInterState ? taxAmount : 0;
-  const total = +(taxableAmount + taxAmount).toFixed(2);
-  return { taxableAmount: +taxableAmount.toFixed(2), cgst, sgst, igst, total };
-}
+//
+// `calcLineGST` used to live here. It has been REMOVED, not deprecated, because
+// leaving it available would let new code reintroduce the defects it carried:
+//
+//   - floating-point arithmetic, which lost money on accumulation
+//   - no compensation cess support (28%+cess items undercharged silently)
+//   - no exempt / nil-rated / non-GST / zero-rated distinction
+//   - callers subtracted the invoice discount AFTER tax, overcharging GST
+//
+// Use `computeGstInvoice()` from src/lib/gst.ts instead. It works in integer
+// paise, applies discounts before tax, and is covered by tests.
+// ---------------------------------------------------------------------------
+
+export { formatPaise, toPaise, toRupees } from "./money";

@@ -43,7 +43,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
   if (!ctx.company.gstin)
     return NextResponse.json({ error: "Add your company GSTIN in Settings first" }, { status: 400 });
 
-  const irn = makeIRN(`${ctx.company.gstin}-${invoice.number}-${invoice.grandTotal}`);
+  const irn = makeIRN(`${ctx.company.gstin}-${invoice.number}-${invoice.grandTotalPaise}`);
   const ackNo = String(Math.floor(1e14 + Math.random() * 9e14)); // 15-digit ack no
   const ackDate = new Date();
 
@@ -54,7 +54,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
     DocNo: invoice.number,
     DocTyp: "INV",
     DocDt: new Date(invoice.date).toLocaleDateString("en-GB"),
-    TotInvVal: invoice.grandTotal,
+    TotInvVal: invoice.grandTotalPaise,
     ItemCnt: undefined,
     MainHsnCode: undefined,
     Irn: irn,

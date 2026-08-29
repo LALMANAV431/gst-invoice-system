@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import { Upload, CheckCircle, XCircle, Landmark } from "lucide-react";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/utils";
 
 export default function BankReconciliationPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -144,9 +144,9 @@ export default function BankReconciliationPage() {
                     <td className="text-xs">{new Date(t.date).toLocaleDateString("en-IN")}</td>
                     <td>{t.description}</td>
                     <td className="text-xs">{t.reference || "—"}</td>
-                    <td className="text-right">{t.debit > 0 ? formatINR(t.debit) : "—"}</td>
-                    <td className="text-right">{t.credit > 0 ? formatINR(t.credit) : "—"}</td>
-                    <td className="text-right font-medium">{formatINR(t.balance)}</td>
+                    <td className="text-right">{t.debit > 0 ? formatPaise(t.debit) : "—"}</td>
+                    <td className="text-right">{t.credit > 0 ? formatPaise(t.credit) : "—"}</td>
+                    <td className="text-right font-medium">{formatPaise(t.balance)}</td>
                     <td>
                       {t.isMatched ? (
                         <span className="badge-green"><CheckCircle className="h-3 w-3" /> Matched</span>

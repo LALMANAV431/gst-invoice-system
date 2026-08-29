@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/utils";
 import { getEffectivePlans, planActive, type PlanId } from "@/lib/plan";
 import { Building2, Users, FileText, IndianRupee, Ticket, TrendingUp, Download } from "lucide-react";
 import { NewCompaniesChart, RevenueByPlanChart } from "@/components/AdminCharts";
@@ -22,7 +22,7 @@ export default async function AdminOverviewPage() {
   for (const c of companies) {
     const active = planActive(c.plan, c.planExpiry) as PlanId;
     counts[active] = (counts[active] || 0) + 1;
-    const price = plans[active]?.price || 0;
+    const price = plans[active]?.priceMonthlyPaise || 0;
     revenue[active] += price;
     mrr += price;
   }
@@ -55,7 +55,7 @@ export default async function AdminOverviewPage() {
     { label: "Total Companies", value: String(companies.length), icon: Building2, color: "from-blue-500 to-blue-600" },
     { label: "Total Users", value: String(userCount), icon: Users, color: "from-violet-500 to-violet-600" },
     { label: "Total Invoices", value: String(invoiceCount), icon: FileText, color: "from-emerald-500 to-emerald-600" },
-    { label: "Est. MRR", value: formatINR(mrr), icon: IndianRupee, color: "from-amber-500 to-amber-600" },
+    { label: "Est. MRR", value: formatPaise(mrr), icon: IndianRupee, color: "from-amber-500 to-amber-600" },
   ];
 
   return (
@@ -147,7 +147,7 @@ export default async function AdminOverviewPage() {
             </li>
             <li className="flex justify-between">
               <span className="text-slate-400">Est. ARR</span>
-              <span className="font-semibold">{formatINR(mrr * 12)}</span>
+              <span className="font-semibold">{formatPaise(mrr * 12)}</span>
             </li>
           </ul>
         </div>

@@ -2,13 +2,19 @@
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { IndianRupee, Save } from "lucide-react";
+import { toPaise, toRupees } from "@/lib/money";
 
 type PlanRow = {
   id: string;
   name: string;
   tagline?: string | null;
-  price: number;
-  priceAnnual: number;
+  // The API speaks paise. The form edits rupees, because the labels say "Rs"
+  // and an owner typing 299 means two hundred and ninety-nine rupees. Keeping
+  // both on the row makes the conversion boundary explicit instead of leaving a
+  // paise value behind a rupee label - which is what previously showed 29900
+  // in a field labelled "Monthly Rs".
+  priceMonthlyRupees: number;
+  priceAnnualRupees: number;
   invoiceLimit: number; // Infinity becomes a big number over JSON
   userLimit: number;
 };
@@ -30,6 +36,8 @@ export default function AdminPricingPage() {
           const p = data[k];
           norm[k] = {
             ...p,
+            priceMonthlyRupees: toRupees(p.priceMonthlyPaise ?? 0),
+            priceAnnualRupees: toRupees(p.priceAnnualPaise ?? 0),
             invoiceLimit: p.invoiceLimit === null || p.invoiceLimit > 100000 ? -1 : p.invoiceLimit,
           };
         }
@@ -51,8 +59,9 @@ export default function AdminPricingPage() {
         id,
         name: p.name,
         tagline: p.tagline,
-        priceMonthly: p.price,
-        priceAnnual: p.priceAnnual,
+        // The form edits rupees; the column stores paise.
+        priceMonthlyPaise: toPaise(p.priceMonthlyRupees),
+        priceAnnualPaise: toPaise(p.priceAnnualRupees),
         invoiceLimit: p.invoiceLimit,
         userLimit: p.userLimit,
       }),
@@ -89,11 +98,11 @@ export default function AdminPricingPage() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs text-slate-400">Monthly ₹</label>
-                  <input type="number" className={inputCls} value={p.price} onChange={(e) => set(id, "price", parseFloat(e.target.value) || 0)} />
+                  <input type="number" step="0.01" min="0" className={inputCls} value={p.priceMonthlyRupees} onChange={(e) => set(id, "priceMonthlyRupees", parseFloat(e.target.value) || 0)} />
                 </div>
                 <div>
                   <label className="text-xs text-slate-400">Annual ₹</label>
-                  <input type="number" className={inputCls} value={p.priceAnnual} onChange={(e) => set(id, "priceAnnual", parseFloat(e.target.value) || 0)} />
+                  <input type="number" step="0.01" min="0" className={inputCls} value={p.priceAnnualRupees} onChange={(e) => set(id, "priceAnnualRupees", parseFloat(e.target.value) || 0)} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">

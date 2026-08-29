@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { generateInvoicePDF } from "@/lib/pdf";
 import { shareWhatsApp, shareEmail } from "@/lib/export";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/utils";
 
 export default function InvoiceActions({ invoice, company }: { invoice: any; company: any }) {
   const router = useRouter();
   const [recordingPayment, setRecordingPayment] = useState(false);
-  const [amount, setAmount] = useState(invoice.grandTotal - invoice.amountPaid);
+  const [amount, setAmount] = useState(invoice.grandTotalPaise - invoice.amountPaidPaise);
   const [mode, setMode] = useState("CASH");
   const [busy, setBusy] = useState<"" | "irn" | "eway">("");
 
@@ -100,7 +100,7 @@ export default function InvoiceActions({ invoice, company }: { invoice: any; com
       <button
         className="btn-secondary !bg-emerald-50 !text-emerald-700 !border-emerald-200 hover:!bg-emerald-100"
         onClick={() => {
-          const msg = `Invoice ${invoice.number}\nAmount: ${formatINR(invoice.grandTotal)}\nDate: ${new Date(invoice.date).toLocaleDateString("en-IN")}\nFrom: ${company.name}${company.gstin ? `\nGSTIN: ${company.gstin}` : ""}`;
+          const msg = `Invoice ${invoice.number}\nAmount: ${formatPaise(invoice.grandTotalPaise)}\nDate: ${new Date(invoice.date).toLocaleDateString("en-IN")}\nFrom: ${company.name}${company.gstin ? `\nGSTIN: ${company.gstin}` : ""}`;
           shareWhatsApp(msg, invoice.party?.phone);
           toast.success("Opening WhatsApp...");
         }}
@@ -113,7 +113,7 @@ export default function InvoiceActions({ invoice, company }: { invoice: any; com
           shareEmail({
             to: invoice.party?.email || "",
             subject: `Invoice ${invoice.number} from ${company.name}`,
-            body: `Dear ${invoice.party?.name},\n\nPlease find attached invoice ${invoice.number} for ${formatINR(invoice.grandTotal)}.\n\nRegards,\n${company.name}`,
+            body: `Dear ${invoice.party?.name},\n\nPlease find attached invoice ${invoice.number} for ${formatPaise(invoice.grandTotalPaise)}.\n\nRegards,\n${company.name}`,
           });
           toast.success("Opening email...");
         }}
@@ -136,7 +136,7 @@ export default function InvoiceActions({ invoice, company }: { invoice: any; com
           <Truck className="h-4 w-4" /> EWB ✓
         </span>
       ) : (
-        invoice.grandTotal >= 50000 && (
+        invoice.grandTotalPaise >= 50000 && (
           <button className="btn-secondary !bg-amber-50 !text-amber-700 !border-amber-200 hover:!bg-amber-100" onClick={generateEway} disabled={busy === "eway"}>
             {busy === "eway" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />} E-Way Bill
           </button>

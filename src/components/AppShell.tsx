@@ -29,30 +29,46 @@ import {
   ShieldCheck,
   LifeBuoy,
   Eye,
+  Sparkles,
+  BookOpenCheck,
+  ClipboardList,
+  SlidersHorizontal,
+  ClipboardCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ThemeToggle from "@/components/ThemeToggle";
+import LanguageToggle from "@/components/LanguageToggle";
+import NotificationBell from "@/components/NotificationBell";
+import { useT } from "@/lib/i18n/client";
+import type { Locale, TranslationKey } from "@/lib/i18n";
 
-type NavItem = { href: string; label: string; icon: any; flag?: string };
+// Labels are translation KEYS, resolved at render time. Holding English strings
+// here is what made the sidebar untranslatable.
+type NavItem = { href: string; labelKey: TranslationKey; icon: any; flag?: string };
 
 const NAV: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pos", label: "POS Billing", icon: ScanLine, flag: "flag_pos" },
-  { href: "/parties", label: "Parties", icon: Users },
-  { href: "/items", label: "Items", icon: Boxes },
-  { href: "/quotations", label: "Quotations", icon: FileSpreadsheet, flag: "flag_quotations" },
-  { href: "/invoices", label: "Sales Invoices", icon: FileText },
-  { href: "/purchases", label: "Purchases", icon: ShoppingCart },
-  { href: "/credit-notes", label: "Credit/Debit Notes", icon: RotateCcw, flag: "flag_credit_notes" },
-  { href: "/payments", label: "Payments", icon: IndianRupee },
-  { href: "/expenses", label: "Expenses", icon: Wallet, flag: "flag_expenses" },
-  { href: "/godowns", label: "Godowns", icon: Warehouse, flag: "flag_godowns" },
-  { href: "/bank-reconciliation", label: "Bank Recon", icon: Landmark, flag: "flag_bank" },
-  { href: "/budgets", label: "Budgets", icon: PiggyBank, flag: "flag_budgets" },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/billing", label: "Plans & Billing", icon: Crown },
-  { href: "/support", label: "Help & Support", icon: LifeBuoy },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
+  { href: "/pos", labelKey: "nav.pos", icon: ScanLine, flag: "flag_pos" },
+  { href: "/parties", labelKey: "nav.parties", icon: Users },
+  { href: "/items", labelKey: "nav.items", icon: Boxes },
+  { href: "/quotations", labelKey: "nav.quotations", icon: FileSpreadsheet, flag: "flag_quotations" },
+  { href: "/orders", labelKey: "nav.orders", icon: ClipboardList, flag: "flag_orders" },
+  { href: "/invoices", labelKey: "nav.invoices", icon: FileText },
+  { href: "/purchases", labelKey: "nav.purchases", icon: ShoppingCart },
+  { href: "/credit-notes", labelKey: "nav.creditNotes", icon: RotateCcw, flag: "flag_credit_notes" },
+  { href: "/payments", labelKey: "nav.payments", icon: IndianRupee },
+  { href: "/expenses", labelKey: "nav.expenses", icon: Wallet, flag: "flag_expenses" },
+  { href: "/journal", labelKey: "doc.journalVoucher", icon: BookOpenCheck, flag: "flag_journal" },
+  { href: "/godowns", labelKey: "nav.godowns", icon: Warehouse, flag: "flag_godowns" },
+  { href: "/stock-adjustments", labelKey: "nav.stockAdjustments", icon: SlidersHorizontal, flag: "flag_godowns" },
+  { href: "/physical-counts", labelKey: "nav.physicalCounts", icon: ClipboardCheck, flag: "flag_godowns" },
+  { href: "/bank-reconciliation", labelKey: "nav.bankRecon", icon: Landmark, flag: "flag_bank" },
+  { href: "/budgets", labelKey: "nav.budgets", icon: PiggyBank, flag: "flag_budgets" },
+  { href: "/reports", labelKey: "nav.reports", icon: BarChart3 },
+  { href: "/assistant", labelKey: "ai.title", icon: Sparkles, flag: "flag_ai" },
+  { href: "/billing", labelKey: "nav.billing", icon: Crown },
+  { href: "/support", labelKey: "nav.support", icon: LifeBuoy },
+  { href: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -65,6 +81,7 @@ function NavLinks({
   flags?: Record<string, boolean>;
 }) {
   const pathname = usePathname();
+  const { t } = useT();
   const items = NAV.filter((it) => !it.flag || !flags || flags[it.flag] !== false);
   return (
     <nav className="p-3 space-y-1">
@@ -90,7 +107,7 @@ function NavLinks({
               />
             )}
             <it.icon className={cn("relative h-[18px] w-[18px]", active && "text-brand-600")} />
-            <span className="relative">{it.label}</span>
+            <span className="relative">{t(it.labelKey)}</span>
           </Link>
         );
       })}
@@ -108,6 +125,7 @@ export default function AppShell({
   isSuperAdmin,
   flags,
   impersonating,
+  locale,
   children,
 }: {
   userName: string;
@@ -119,15 +137,17 @@ export default function AppShell({
   isSuperAdmin?: boolean;
   flags?: Record<string, boolean>;
   impersonating?: boolean;
+  locale: Locale;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { t } = useT();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
-    toast.success("Logged out");
+    toast.success(t("nav.logout"));
     router.push("/login");
     router.refresh();
   }
@@ -278,6 +298,8 @@ export default function AppShell({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationBell />
+            <LanguageToggle current={locale} />
             <ThemeToggle />
             {isSuperAdmin && (
               <Link
@@ -291,7 +313,7 @@ export default function AppShell({
               POS
             </Link>
             <Link href="/invoices/new" className="btn-primary hidden sm:inline-flex !py-2 !px-3.5">
-              <Plus className="h-4 w-4" /> New Invoice
+              <Plus className="h-4 w-4" /> {t("nav.newInvoice")}
             </Link>
             <div className="text-right hidden sm:block">
               <div className="text-sm font-medium text-slate-900 leading-tight dark:text-slate-100">{userName}</div>

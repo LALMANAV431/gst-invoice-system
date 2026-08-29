@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
+import { recordStockMovement } from "@/server/stock";
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const ctx = await getCurrentUserAndCompany();
@@ -25,19 +26,15 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
   await db.$transaction(async (tx) => {
     for (const it of purchase.items) {
       if (it.itemId) {
-        await tx.item.update({
-          where: { id: it.itemId },
-          data: { currentStock: { decrement: it.quantity } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: ctx.company!.id,
-            itemId: it.itemId,
-            type: "OUT",
-            quantity: it.quantity,
-            reference: purchase.number,
-            notes: `Reversed: ${purchase.number}`,
-          },
+        await recordStockMovement(tx, {
+          companyId: ctx.company!.id,
+          itemId: it.itemId,
+          direction: "OUT",
+          quantity: it.quantity,
+          reference: purchase.number,
+          notes: `Reversed: ${purchase.number}`,
+          sourceType: "PURCHASE_RETURN",
+          sourceId: purchase.id,
         });
       }
     }

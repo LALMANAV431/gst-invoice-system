@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { Plus, Eye } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 
@@ -76,7 +76,7 @@ export default async function QuotationsPage() {
                     <td>{formatDate(q.date)}</td>
                     <td>{q.validUntil ? formatDate(q.validUntil) : "—"}</td>
                     <td>{q.party.name}</td>
-                    <td className="text-right font-semibold">{formatINR(q.grandTotal)}</td>
+                    <td className="text-right font-semibold">{formatPaise(q.grandTotalPaise)}</td>
                     <td>
                       <StatusBadge status={q.status} />
                     </td>
