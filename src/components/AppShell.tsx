@@ -36,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import ThemeToggle from "@/components/ThemeToggle";
 import LanguageToggle from "@/components/LanguageToggle";
+import NotificationBell from "@/components/NotificationBell";
 import { useT } from "@/lib/i18n/client";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 
@@ -293,6 +294,7 @@ export default function AppShell({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationBell />
             <LanguageToggle current={locale} />
             <ThemeToggle />
             {isSuperAdmin && (

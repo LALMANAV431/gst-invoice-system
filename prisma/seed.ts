@@ -154,6 +154,11 @@ async function main() {
   // must be cleared here. Forgetting one makes the wipe fail with an opaque
   // P2003 — which is exactly what happened when OrderDocument and PaymentLink
   // were added and this list was not updated.
+  await prisma.webhookDelivery.deleteMany();
+  await prisma.outboundWebhook.deleteMany();
+  await prisma.messageLog.deleteMany();
+  await prisma.notificationSetting.deleteMany();
+  await prisma.notification.deleteMany();
   await prisma.paymentLink.deleteMany();
   await prisma.billingInvoice.deleteMany();
   await prisma.subscription.deleteMany();
@@ -242,6 +247,9 @@ async function main() {
       name: "Sharma Electronics",
       type: "CUSTOMER",
       gstin: "27AAACS1234B1Z0",
+      // Synthetic address on a reserved example domain: real enough to
+      // demonstrate payment reminders, impossible to actually email.
+      email: "accounts@sharma-electronics.example",
       phone: "+91 9988776655",
       city: "Pune",
       state: "Maharashtra",
@@ -299,6 +307,9 @@ async function main() {
     { name: "Printed Book (exempt)", hsn: "4901", unit: "NOS", sale: 350, purchase: 220, gstRate: 0, stock: 15, supplyType: "EXEMPT" },
     // Exercises cess, which was previously unsupported entirely.
     { name: "Aerated Drink 300ml", hsn: "2202", unit: "NOS", sale: 40, purchase: 25, gstRate: 28, stock: 120, cessRate: 12 },
+    // Deliberately below its reorder level so the low-stock reminder is
+    // demonstrable. A feature that cannot be seen with demo data looks broken.
+    { name: "Screen Guard (universal)", hsn: "3919", unit: "NOS", sale: 149, purchase: 45, gstRate: 18, stock: 3, lowStock: 25 },
   ];
 
   const items: { id: string; name: string; hsn: string; unit: string; salePricePaise: number; purchasePricePaise: number; gstRate: number; cessRate: number; supplyType: string }[] = [];
@@ -316,7 +327,7 @@ async function main() {
         supplyType: it.supplyType ?? "TAXABLE",
         openingStock: it.stock,
         currentStock: it.stock,
-        lowStockAlert: 10,
+        lowStockAlert: it.lowStock ?? 10,
       },
     });
     items.push(created as never);
@@ -509,6 +520,14 @@ async function main() {
       { item: byName("Laptop Bag"), qty: 4 },
     ],
     date: daysAgo(8),
+  });
+
+  // Deliberately overdue: dated 75 days ago with 30-day terms, so the overdue
+  // reminder, the ageing buckets and the outstanding report all have data.
+  await createDemoInvoice({
+    party: customer,
+    lines: [{ item: byName("Samsung Galaxy A15"), qty: 1 }],
+    date: daysAgo(75),
   });
 
   // Mixed exempt + cess, over-the-counter and paid in cash.
