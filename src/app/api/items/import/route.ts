@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 
 // Bulk import items from parsed CSV rows.
-// Expected keys (case-insensitive): name, sku, hsn, barcode, unit, salePrice, purchasePrice, gstRate, openingStock, lowStockAlert
+// Expected keys (case-insensitive): name, sku, hsn, barcode, unit, salePricePaise, purchasePricePaise, gstRate, openingStock, lowStockAlert
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -40,8 +40,8 @@ export async function POST(req: Request) {
           hsn: (norm(r, "hsn") || "")?.toString() || null,
           barcode: (norm(r, "barcode", "ean", "upc") || "")?.toString() || null,
           unit: (norm(r, "unit") || "NOS")?.toString() || "NOS",
-          salePrice: parseFloat(norm(r, "saleprice", "sellingprice", "mrp", "rate")) || 0,
-          purchasePrice: parseFloat(norm(r, "purchaseprice", "costprice", "cost")) || 0,
+          salePricePaise: parseFloat(norm(r, "saleprice", "sellingprice", "mrp", "rate")) || 0,
+          purchasePricePaise: parseFloat(norm(r, "purchaseprice", "costprice", "cost")) || 0,
           gstRate: parseFloat(norm(r, "gstrate", "gst", "tax")) || 0,
           openingStock: opening,
           currentStock: opening,

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate, formatNumber } from "@/lib/utils";
+import { formatPaise, formatDate, formatNumber } from "@/lib/utils";
 import { ArrowUpRight, AlertTriangle, Plus } from "lucide-react";
 import DashboardKpis, { type Kpi } from "@/components/DashboardKpis";
 import { RevenueAreaChart, CategoryDonut } from "@/components/DashboardCharts";
@@ -37,18 +37,18 @@ export default async function DashboardPage() {
     trendPurchases,
     topItems,
   ] = await Promise.all([
-    db.invoice.aggregate({ where: { companyId }, _sum: { grandTotal: true } }),
+    db.invoice.aggregate({ where: { companyId }, _sum: { grandTotalPaise: true } }),
     db.invoice.aggregate({
       where: { companyId, date: { gte: startOfMonth } },
-      _sum: { grandTotal: true },
+      _sum: { grandTotalPaise: true },
     }),
     db.invoice.aggregate({
       where: { companyId, status: { not: "PAID" } },
-      _sum: { grandTotal: true, amountPaid: true },
+      _sum: { grandTotalPaise: true, amountPaidPaise: true },
     }),
     db.purchase.aggregate({
       where: { companyId, status: { not: "PAID" } },
-      _sum: { grandTotal: true, amountPaid: true },
+      _sum: { grandTotalPaise: true, amountPaidPaise: true },
     }),
     db.item.findMany({
       where: { companyId, lowStockAlert: { gt: 0 } },
@@ -66,26 +66,26 @@ export default async function DashboardPage() {
     db.item.count({ where: { companyId } }),
     db.invoice.findMany({
       where: { companyId, date: { gte: sixMonthsAgo } },
-      select: { date: true, grandTotal: true },
+      select: { date: true, grandTotalPaise: true },
     }),
     db.purchase.findMany({
       where: { companyId, date: { gte: sixMonthsAgo } },
-      select: { date: true, grandTotal: true },
+      select: { date: true, grandTotalPaise: true },
     }),
     db.invoiceItem.groupBy({
       by: ["itemName"],
       where: { invoice: { companyId } },
-      _sum: { total: true },
-      orderBy: { _sum: { total: "desc" } },
+      _sum: { totalPaise: true },
+      orderBy: { _sum: { totalPaise: "desc" } },
       take: 6,
     }),
   ]);
 
-  const totalSales = totalSalesAgg._sum.grandTotal ?? 0;
-  const monthSales = monthSalesAgg._sum.grandTotal ?? 0;
+  const totalSales = totalSalesAgg._sum.grandTotalPaise ?? 0;
+  const monthSales = monthSalesAgg._sum.grandTotalPaise ?? 0;
   const receivables =
-    (receivablesAgg._sum.grandTotal ?? 0) - (receivablesAgg._sum.amountPaid ?? 0);
-  const payables = (payablesAgg._sum.grandTotal ?? 0) - (payablesAgg._sum.amountPaid ?? 0);
+    (receivablesAgg._sum.grandTotalPaise ?? 0) - (receivablesAgg._sum.amountPaidPaise ?? 0);
+  const payables = (payablesAgg._sum.grandTotalPaise ?? 0) - (payablesAgg._sum.amountPaidPaise ?? 0);
 
   const kpis: Kpi[] = [
     { key: "sales", label: "Total Sales", value: totalSales },
@@ -111,12 +111,12 @@ export default async function DashboardPage() {
   for (const inv of trendInvoices) {
     const d = new Date(inv.date);
     const m = bucket.get(`${d.getFullYear()}-${d.getMonth()}`);
-    if (m) m.sales += inv.grandTotal;
+    if (m) m.sales += inv.grandTotalPaise;
   }
   for (const pur of trendPurchases) {
     const d = new Date(pur.date);
     const m = bucket.get(`${d.getFullYear()}-${d.getMonth()}`);
-    if (m) m.purchases += pur.grandTotal;
+    if (m) m.purchases += pur.grandTotalPaise;
   }
   const trendData = months.map((m) => ({
     month: m.month,
@@ -125,8 +125,8 @@ export default async function DashboardPage() {
   }));
 
   const donutData = topItems
-    .filter((t) => (t._sum.total ?? 0) > 0)
-    .map((t) => ({ name: t.itemName, value: Math.round(t._sum.total ?? 0) }));
+    .filter((t) => (t._sum.totalPaise ?? 0) > 0)
+    .map((t) => ({ name: t.itemName, value: Math.round(t._sum.totalPaise ?? 0) }));
 
   const lowStockItems = lowStock.filter((i) => i.currentStock <= i.lowStockAlert);
 
@@ -225,7 +225,7 @@ export default async function DashboardPage() {
                         </td>
                         <td>{inv.party.name}</td>
                         <td>{formatDate(inv.date)}</td>
-                        <td className="text-right font-semibold">{formatINR(inv.grandTotal)}</td>
+                        <td className="text-right font-semibold">{formatPaise(inv.grandTotalPaise)}</td>
                         <td>
                           <StatusBadge status={inv.status} />
                         </td>

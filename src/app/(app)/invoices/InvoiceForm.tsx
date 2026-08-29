@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { Plus, Trash2 } from "lucide-react";
-import { calcLineGST, formatINR, inputDate } from "@/lib/utils";
+import { inputDate } from "@/lib/utils";
+import { formatPaise, toRupees } from "@/lib/money";
+import { computeGstInvoice, GST_RATES, SupplyType } from "@/lib/gst";
 
 type Party = {
   id: string;
@@ -16,11 +18,16 @@ type Item = {
   name: string;
   hsn: string | null;
   unit: string;
-  salePrice: number;
-  purchasePrice: number;
+  salePricePaise: number;
+  purchasePricePaise: number;
   gstRate: number;
+  cessRate: number;
+  supplyType: string;
+  pricingMode: string;
 };
 
+/** Line as edited in the form. Rate and discount stay in RUPEES here, because
+ *  that is what the user types; conversion to paise happens in the engine. */
 type Line = {
   itemId: string | null;
   itemName: string;
@@ -30,6 +37,9 @@ type Line = {
   rate: number;
   discount: number;
   gstRate: number;
+  cessRate: number;
+  supplyType: SupplyType;
+  pricingMode: "EXCLUSIVE" | "INCLUSIVE";
 };
 
 export type DocMode = "sales" | "purchase" | "quotation" | "credit" | "debit";
@@ -43,14 +53,25 @@ const newLine = (): Line => ({
   rate: 0,
   discount: 0,
   gstRate: 18,
+  cessRate: 0,
+  supplyType: "TAXABLE",
+  pricingMode: "EXCLUSIVE",
 });
+
+const SUPPLY_TYPE_LABELS: Record<SupplyType, string> = {
+  TAXABLE: "Taxable",
+  EXEMPT: "Exempt",
+  NIL_RATED: "Nil rated",
+  NON_GST: "Non-GST",
+  ZERO_RATED: "Zero rated (export/SEZ)",
+};
 
 type ModeConfig = {
   endpoint: string;
   redirectBase: string;
   partyLabel: string;
   saveLabel: string;
-  priceField: "salePrice" | "purchasePrice";
+  priceField: "salePricePaise" | "purchasePricePaise";
   showVendorBill: boolean;
   showValidUntil: boolean;
   showReason: boolean;
@@ -63,7 +84,7 @@ const CONFIG: Record<DocMode, ModeConfig> = {
     redirectBase: "/invoices",
     partyLabel: "Customer",
     saveLabel: "Save Invoice",
-    priceField: "salePrice",
+    priceField: "salePricePaise",
     showVendorBill: false,
     showValidUntil: false,
     showReason: false,
@@ -73,7 +94,7 @@ const CONFIG: Record<DocMode, ModeConfig> = {
     redirectBase: "/purchases",
     partyLabel: "Vendor",
     saveLabel: "Save Purchase",
-    priceField: "purchasePrice",
+    priceField: "purchasePricePaise",
     showVendorBill: true,
     showValidUntil: false,
     showReason: false,
@@ -83,7 +104,7 @@ const CONFIG: Record<DocMode, ModeConfig> = {
     redirectBase: "/quotations",
     partyLabel: "Customer",
     saveLabel: "Save Quotation",
-    priceField: "salePrice",
+    priceField: "salePricePaise",
     showVendorBill: false,
     showValidUntil: true,
     showReason: false,
@@ -93,7 +114,7 @@ const CONFIG: Record<DocMode, ModeConfig> = {
     redirectBase: "/credit-notes",
     partyLabel: "Customer",
     saveLabel: "Save Credit Note",
-    priceField: "salePrice",
+    priceField: "salePricePaise",
     showVendorBill: false,
     showValidUntil: false,
     showReason: true,
@@ -104,7 +125,7 @@ const CONFIG: Record<DocMode, ModeConfig> = {
     redirectBase: "/credit-notes",
     partyLabel: "Vendor",
     saveLabel: "Save Debit Note",
-    priceField: "purchasePrice",
+    priceField: "purchasePricePaise",
     showVendorBill: false,
     showValidUntil: false,
     showReason: true,
@@ -134,49 +155,56 @@ export default function InvoiceForm({
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
   const [discount, setDiscount] = useState(0);
-  const [roundOff, setRoundOff] = useState(0);
+  const [additionalCharges, setAdditionalCharges] = useState(0);
+  const [reverseCharge, setReverseCharge] = useState(false);
   const [tdsRate, setTdsRate] = useState(0);
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [loading, setLoading] = useState(false);
 
   const selectedParty = parties.find((p) => p.id === partyId) || null;
-  const isInterState = !!(
-    companyStateCode &&
-    selectedParty?.stateCode &&
-    companyStateCode !== selectedParty.stateCode
-  );
 
-  const totals = useMemo(() => {
-    let subTotal = 0,
-      cgst = 0,
-      sgst = 0,
-      igst = 0;
-    for (const l of lines) {
-      const r = calcLineGST({
-        quantity: l.quantity,
-        rate: l.rate,
-        discount: l.discount,
-        gstRate: l.gstRate,
-        isInterState,
+  /**
+   * The live preview runs the SAME engine the server uses, so the total shown
+   * here is the total that gets saved. Previously the form used a separate
+   * `calcLineGST` helper and applied the invoice discount after tax, so the
+   * preview and the stored invoice could disagree.
+   */
+  const gst = useMemo(() => {
+    try {
+      return computeGstInvoice({
+        supplierStateCode: companyStateCode,
+        placeOfSupplyStateCode: selectedParty?.stateCode,
+        lines: lines.map((l) => ({
+          quantity: l.quantity,
+          rate: l.rate,
+          discount: l.discount,
+          gstRate: l.gstRate,
+          cessRate: l.cessRate,
+          supplyType: l.supplyType,
+          pricingMode: l.pricingMode,
+        })),
+        invoiceDiscount: discount,
+        additionalCharges,
+        reverseCharge,
+        tdsRate: mode === "sales" ? tdsRate : 0,
+        roundToNearestRupee: true,
       });
-      subTotal += r.taxableAmount;
-      cgst += r.cgst;
-      sgst += r.sgst;
-      igst += r.igst;
+    } catch {
+      // An empty or half-typed row is not an error worth surfacing mid-edit.
+      return null;
     }
-    const tax = +(cgst + sgst + igst).toFixed(2);
-    const tdsAmt = mode === "sales" ? +((subTotal * (tdsRate || 0)) / 100).toFixed(2) : 0;
-    const grand = +(subTotal + tax - (discount || 0) + (roundOff || 0) - tdsAmt).toFixed(2);
-    return {
-      subTotal: +subTotal.toFixed(2),
-      cgst: +cgst.toFixed(2),
-      sgst: +sgst.toFixed(2),
-      igst: +igst.toFixed(2),
-      tax,
-      tdsAmt,
-      grand,
-    };
-  }, [lines, discount, roundOff, isInterState, tdsRate, mode]);
+  }, [
+    lines,
+    discount,
+    additionalCharges,
+    reverseCharge,
+    tdsRate,
+    mode,
+    companyStateCode,
+    selectedParty?.stateCode,
+  ]);
+
+  const isInterState = gst?.isInterState ?? false;
 
   function updateLine(i: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
@@ -194,8 +222,12 @@ export default function InvoiceForm({
       itemName: it.name,
       hsn: it.hsn || "",
       unit: it.unit,
-      rate: it[cfg.priceField],
+      // Stored in paise; the form edits rupees.
+      rate: toRupees(it[cfg.priceField]),
       gstRate: it.gstRate,
+      cessRate: it.cessRate ?? 0,
+      supplyType: (it.supplyType as SupplyType) ?? "TAXABLE",
+      pricingMode: it.pricingMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE",
     });
   }
 
@@ -220,7 +252,8 @@ export default function InvoiceForm({
         reason: reason || null,
         notes,
         discount,
-        roundOff,
+        additionalCharges,
+        reverseCharge,
         tdsRate: mode === "sales" ? tdsRate : 0,
         items: valid,
       }),
@@ -325,6 +358,21 @@ export default function InvoiceForm({
             </div>
           </>
         )}
+        <div className="md:col-span-2 flex items-end">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={reverseCharge}
+              onChange={(e) => setReverseCharge(e.target.checked)}
+            />
+            <span>
+              Reverse charge applies
+              <span className="block text-xs text-slate-500">
+                Tax is payable by the recipient; no GST is collected here.
+              </span>
+            </span>
+          </label>
+        </div>
       </div>
 
       <div className="card card-padding">
@@ -342,26 +390,23 @@ export default function InvoiceForm({
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: "26%" }}>Item</th>
+                <th style={{ width: "22%" }}>Item</th>
                 <th>HSN</th>
                 <th className="text-right">Qty</th>
                 <th>Unit</th>
                 <th className="text-right">Rate</th>
                 <th className="text-right">Disc</th>
                 <th className="text-right">GST%</th>
+                <th className="text-right">Cess%</th>
+                <th>Supply</th>
                 <th className="text-right">Total</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {lines.map((l, i) => {
-                const r = calcLineGST({
-                  quantity: l.quantity,
-                  rate: l.rate,
-                  discount: l.discount,
-                  gstRate: l.gstRate,
-                  isInterState,
-                });
+                // Comes from the same engine result the totals use.
+                const computed = gst?.lines[i];
                 return (
                   <tr key={i}>
                     <td>
@@ -417,6 +462,18 @@ export default function InvoiceForm({
                         value={l.rate}
                         onChange={(e) => updateLine(i, { rate: parseFloat(e.target.value) || 0 })}
                       />
+                      <select
+                        className="input mt-1 text-xs"
+                        value={l.pricingMode}
+                        onChange={(e) =>
+                          updateLine(i, {
+                            pricingMode: e.target.value as "EXCLUSIVE" | "INCLUSIVE",
+                          })
+                        }
+                      >
+                        <option value="EXCLUSIVE">+ GST</option>
+                        <option value="INCLUSIVE">GST incl.</option>
+                      </select>
                     </td>
                     <td>
                       <input
@@ -430,17 +487,51 @@ export default function InvoiceForm({
                       />
                     </td>
                     <td>
-                      <input
-                        type="number"
-                        step="0.01"
+                      <select
                         className="input text-right"
                         value={l.gstRate}
                         onChange={(e) =>
                           updateLine(i, { gstRate: parseFloat(e.target.value) || 0 })
                         }
+                        disabled={l.supplyType !== "TAXABLE"}
+                      >
+                        {GST_RATES.map((r) => (
+                          <option key={r} value={r}>
+                            {r}%
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="input text-right"
+                        value={l.cessRate}
+                        onChange={(e) =>
+                          updateLine(i, { cessRate: parseFloat(e.target.value) || 0 })
+                        }
+                        disabled={l.supplyType !== "TAXABLE"}
                       />
                     </td>
-                    <td className="text-right font-medium">{formatINR(r.total)}</td>
+                    <td>
+                      <select
+                        className="input text-xs"
+                        value={l.supplyType}
+                        onChange={(e) =>
+                          updateLine(i, { supplyType: e.target.value as SupplyType })
+                        }
+                      >
+                        {(Object.keys(SUPPLY_TYPE_LABELS) as SupplyType[]).map((t) => (
+                          <option key={t} value={t}>
+                            {SUPPLY_TYPE_LABELS[t]}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="text-right font-medium">
+                      {formatPaise(computed?.totalPaise ?? 0)}
+                    </td>
                     <td>
                       {lines.length > 1 && (
                         <button
@@ -472,17 +563,24 @@ export default function InvoiceForm({
           />
         </div>
         <div className="card card-padding">
-          <Row label="Subtotal" value={formatINR(totals.subTotal)} />
+          <Row label="Taxable value" value={formatPaise(gst?.taxablePaise ?? 0)} />
           {isInterState ? (
-            <Row label="IGST" value={formatINR(totals.igst)} />
+            <Row label="IGST" value={formatPaise(gst?.igstPaise ?? 0)} />
           ) : (
             <>
-              <Row label="CGST" value={formatINR(totals.cgst)} />
-              <Row label="SGST" value={formatINR(totals.sgst)} />
+              <Row label="CGST" value={formatPaise(gst?.cgstPaise ?? 0)} />
+              <Row label="SGST" value={formatPaise(gst?.sgstPaise ?? 0)} />
             </>
           )}
+          {(gst?.cessPaise ?? 0) > 0 && (
+            <Row label="Cess" value={formatPaise(gst?.cessPaise ?? 0)} />
+          )}
+
           <div className="flex items-center justify-between text-sm py-1.5">
-            <span className="text-slate-500">Discount</span>
+            <span className="text-slate-500">
+              Discount
+              <span className="block text-xs text-slate-400">Applied before tax</span>
+            </span>
             <input
               type="number"
               step="0.01"
@@ -492,15 +590,27 @@ export default function InvoiceForm({
             />
           </div>
           <div className="flex items-center justify-between text-sm py-1.5">
-            <span className="text-slate-500">Round off</span>
+            <span className="text-slate-500">Freight / packing</span>
             <input
               type="number"
               step="0.01"
               className="input w-28 text-right"
-              value={roundOff}
-              onChange={(e) => setRoundOff(parseFloat(e.target.value) || 0)}
+              value={additionalCharges}
+              onChange={(e) => setAdditionalCharges(parseFloat(e.target.value) || 0)}
             />
           </div>
+
+          {/* Round-off is computed, not typed: the server rounds the grand total
+              to the nearest rupee and posts the difference to a Round Off ledger. */}
+          {(gst?.roundOffPaise ?? 0) !== 0 && (
+            <Row label="Round off" value={formatPaise(gst?.roundOffPaise ?? 0)} />
+          )}
+
+          <div className="border-t border-slate-200 mt-2 pt-2 flex items-center justify-between">
+            <span className="font-bold">Grand Total</span>
+            <span className="font-bold text-lg">{formatPaise(gst?.grandTotalPaise ?? 0)}</span>
+          </div>
+
           {mode === "sales" && (
             <div className="flex items-center justify-between text-sm py-1.5">
               <span className="text-slate-500">TDS %</span>
@@ -517,13 +627,24 @@ export default function InvoiceForm({
               </select>
             </div>
           )}
-          {mode === "sales" && totals.tdsAmt > 0 && (
-            <Row label="TDS deducted" value={`- ${formatINR(totals.tdsAmt)}`} />
+          {/* TDS does NOT reduce the invoice value - the customer withholds it
+              when paying. Showing it separately keeps the invoice face value
+              correct and matches what the customer's books will say. */}
+          {mode === "sales" && (gst?.tdsPaise ?? 0) > 0 && (
+            <div className="mt-1 rounded-md bg-slate-50 p-2 text-xs text-slate-600">
+              <div className="flex justify-between">
+                <span>TDS the customer will withhold</span>
+                <span className="font-medium">{formatPaise(gst?.tdsPaise ?? 0)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Expected in bank</span>
+                <span className="font-medium">
+                  {formatPaise(gst?.expectedReceiptPaise ?? 0)}
+                </span>
+              </div>
+            </div>
           )}
-          <div className="border-t border-slate-200 mt-2 pt-2 flex items-center justify-between">
-            <span className="font-bold">Grand Total</span>
-            <span className="font-bold text-lg">{formatINR(totals.grand)}</span>
-          </div>
+
           <button disabled={loading} className="btn-primary w-full mt-4">
             {loading ? "Saving..." : cfg.saveLabel}
           </button>

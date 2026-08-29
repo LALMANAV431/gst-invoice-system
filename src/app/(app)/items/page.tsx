@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatNumber } from "@/lib/utils";
+import { formatPaise, formatNumber } from "@/lib/utils";
 import { Plus, Pencil } from "lucide-react";
 import DeleteButton from "./DeleteButton";
 import EmptyState from "@/components/EmptyState";
@@ -27,7 +27,7 @@ export default async function ItemsPage({ searchParams }: { searchParams: { q?: 
           <CsvImport
             endpoint="/api/items/import"
             label="Import"
-            sampleHeaders={["name", "sku", "hsn", "barcode", "unit", "salePrice", "purchasePrice", "gstRate", "openingStock", "lowStockAlert"]}
+            sampleHeaders={["name", "sku", "hsn", "barcode", "unit", "salePricePaise", "purchasePricePaise", "gstRate", "openingStock", "lowStockAlert"]}
           />
           <Link href="/items/new" className="btn-primary">
             <Plus className="h-4 w-4" /> Add Item
@@ -88,8 +88,8 @@ export default async function ItemsPage({ searchParams }: { searchParams: { q?: 
                       </td>
                       <td className="text-xs">{it.hsn || "—"}</td>
                       <td>{it.unit}</td>
-                      <td className="text-right">{formatINR(it.salePrice)}</td>
-                      <td className="text-right">{formatINR(it.purchasePrice)}</td>
+                      <td className="text-right">{formatPaise(it.salePricePaise)}</td>
+                      <td className="text-right">{formatPaise(it.purchasePricePaise)}</td>
                       <td className="text-right">{it.gstRate}%</td>
                       <td className={`text-right font-medium ${low ? "text-rose-600" : ""}`}>
                         {formatNumber(it.currentStock, 0)} {it.unit}

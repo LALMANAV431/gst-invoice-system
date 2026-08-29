@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +46,7 @@ export default async function DayBookPage({
       type: "Sales",
       number: i.number,
       particulars: i.party.name,
-      amount: i.grandTotal,
+      amount: i.grandTotalPaise,
       href: `/invoices/${i.id}`,
       badge: "badge-green",
     })),
@@ -56,7 +56,7 @@ export default async function DayBookPage({
       type: "Purchase",
       number: p.number,
       particulars: p.party.name,
-      amount: p.grandTotal,
+      amount: p.grandTotalPaise,
       href: `/purchases/${p.id}`,
       badge: "badge-amber",
     })),
@@ -66,7 +66,7 @@ export default async function DayBookPage({
       type: p.type === "RECEIVED" ? "Receipt" : "Payment",
       number: p.number,
       particulars: `${p.party.name} · ${p.mode}`,
-      amount: p.amount,
+      amount: p.amountPaise,
       badge: "badge-slate",
     })),
     ...expenses.map((e) => ({
@@ -75,7 +75,7 @@ export default async function DayBookPage({
       type: "Expense",
       number: e.number,
       particulars: e.category,
-      amount: e.total,
+      amount: e.totalPaise,
       href: `/expenses`,
       badge: "badge-red",
     })),
@@ -85,7 +85,7 @@ export default async function DayBookPage({
       type: n.kind === "CREDIT" ? "Credit Note" : "Debit Note",
       number: n.number,
       particulars: n.party.name,
-      amount: n.grandTotal,
+      amount: n.grandTotalPaise,
       href: `/credit-notes/${n.id}`,
       badge: "badge-slate",
     })),
@@ -151,7 +151,7 @@ export default async function DayBookPage({
                       )}
                     </td>
                     <td>{e.particulars}</td>
-                    <td className="text-right font-semibold">{formatINR(e.amount)}</td>
+                    <td className="text-right font-semibold">{formatPaise(e.amount)}</td>
                   </tr>
                 ))
               )}

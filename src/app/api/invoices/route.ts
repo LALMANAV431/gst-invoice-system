@@ -1,21 +1,64 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { calcLineGST } from "@/lib/utils";
-import { nextInvoiceNumber } from "@/lib/numbering";
 import { planActive, invoiceLimitFor, getPlan } from "@/lib/plan";
 import { writeGuard } from "@/lib/guard";
 import { logAudit } from "@/lib/audit";
+import { createInvoice, ValidationError } from "@/server/services/invoice.service";
+import { PeriodLockedError } from "@/server/numbering";
+import { parsePagination, paginated } from "@/lib/pagination";
 
-export async function GET() {
+const lineSchema = z.object({
+  itemId: z.string().nullish(),
+  itemName: z.string().min(1, "Item name is required"),
+  hsn: z.string().nullish(),
+  quantity: z.coerce.number().positive("Quantity must be greater than zero"),
+  unit: z.string().optional(),
+  rate: z.union([z.string(), z.number()]),
+  discount: z.union([z.string(), z.number()]).optional(),
+  gstRate: z.coerce.number().min(0).max(100),
+  cessRate: z.coerce.number().min(0).max(500).optional(),
+  cessPerUnit: z.union([z.string(), z.number()]).optional(),
+  supplyType: z.enum(["TAXABLE", "EXEMPT", "NIL_RATED", "NON_GST", "ZERO_RATED"]).optional(),
+  pricingMode: z.enum(["EXCLUSIVE", "INCLUSIVE"]).optional(),
+});
+
+const createSchema = z.object({
+  partyId: z.string().min(1, "Customer is required"),
+  date: z.coerce.date().optional(),
+  dueDate: z.coerce.date().nullish(),
+  notes: z.string().nullish(),
+  items: z.array(lineSchema).min(1, "Add at least one item"),
+  discount: z.union([z.string(), z.number()]).optional(),
+  additionalCharges: z.union([z.string(), z.number()]).optional(),
+  additionalChargesGstRate: z.coerce.number().min(0).max(100).optional(),
+  reverseCharge: z.coerce.boolean().optional(),
+  tdsRate: z.coerce.number().min(0).max(100).optional(),
+  placeOfSupply: z.string().nullish(),
+});
+
+export async function GET(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const invoices = await db.invoice.findMany({
-    where: { companyId: ctx.company.id },
-    include: { party: true },
-    orderBy: { date: "desc" },
-  });
-  return NextResponse.json(invoices);
+
+  // Previously this returned every invoice for the company with the party
+  // joined, which does not survive a tenant with tens of thousands of invoices.
+  const { skip, take, page, pageSize } = parsePagination(req);
+  const where = { companyId: ctx.company.id };
+
+  const [rows, total] = await Promise.all([
+    db.invoice.findMany({
+      where,
+      include: { party: { select: { id: true, name: true, gstin: true } } },
+      orderBy: { date: "desc" },
+      skip,
+      take,
+    }),
+    db.invoice.count({ where }),
+  ]);
+
+  return NextResponse.json(paginated(rows, total, page, pageSize));
 }
 
 export async function POST(req: Request) {
@@ -23,15 +66,26 @@ export async function POST(req: Request) {
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const blocked = writeGuard(ctx);
   if (blocked) return blocked;
+
   const company = ctx.company;
-  const body = await req.json();
-  const { partyId, date, dueDate, notes, items, discount, roundOff, tdsRate } = body;
 
-  if (!partyId) return NextResponse.json({ error: "Party required" }, { status: 400 });
-  if (!Array.isArray(items) || items.length === 0)
-    return NextResponse.json({ error: "Add at least one item" }, { status: 400 });
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  // ---- Plan limit enforcement (monthly invoice cap) ----
+  const parsed = createSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Invalid request", issues: parsed.error.issues },
+      { status: 400 }
+    );
+  }
+  const input = parsed.data;
+
+  // Plan limit: monthly invoice cap.
   const activePlan = planActive(company.plan, company.planExpiry);
   const limit = invoiceLimitFor(activePlan);
   if (limit !== Infinity) {
@@ -53,112 +107,41 @@ export async function POST(req: Request) {
     }
   }
 
-  const party = await db.party.findFirst({ where: { id: partyId, companyId: company.id } });
-  if (!party) return NextResponse.json({ error: "Invalid party" }, { status: 400 });
-
-  // Determine inter-state by comparing state codes
-  const isInterState = !!(
-    company.stateCode &&
-    party.stateCode &&
-    company.stateCode !== party.stateCode
-  );
-
-  let subTotal = 0;
-  let cgstTotal = 0;
-  let sgstTotal = 0;
-  let igstTotal = 0;
-  const computedItems = items.map((it: any) => {
-    const quantity = parseFloat(it.quantity) || 0;
-    const rate = parseFloat(it.rate) || 0;
-    const itemDiscount = parseFloat(it.discount) || 0;
-    const gstRate = parseFloat(it.gstRate) || 0;
-    const r = calcLineGST({ quantity, rate, discount: itemDiscount, gstRate, isInterState });
-    subTotal += r.taxableAmount;
-    cgstTotal += r.cgst;
-    sgstTotal += r.sgst;
-    igstTotal += r.igst;
-    return {
-      itemId: it.itemId || null,
-      itemName: it.itemName,
-      hsn: it.hsn || null,
-      quantity,
-      unit: it.unit || "NOS",
-      rate,
-      discount: itemDiscount,
-      taxableAmount: r.taxableAmount,
-      gstRate,
-      cgst: r.cgst,
-      sgst: r.sgst,
-      igst: r.igst,
-      total: r.total,
-    };
-  });
-
-  const invDiscount = parseFloat(discount) || 0;
-  const invRoundOff = parseFloat(roundOff) || 0;
-  const taxTotal = +(cgstTotal + sgstTotal + igstTotal).toFixed(2);
-  // TDS is deducted on taxable value and reduces net receivable
-  const tdsRateNum = parseFloat(tdsRate) || 0;
-  const tdsAmount = +((subTotal * tdsRateNum) / 100).toFixed(2);
-  const grandTotal = +(subTotal + taxTotal - invDiscount + invRoundOff - tdsAmount).toFixed(2);
-
-  const number = await nextInvoiceNumber(company.id, company.invoicePrefix);
-
-  const invoice = await db.$transaction(async (tx) => {
-    const created = await tx.invoice.create({
-      data: {
-        companyId: company.id,
-        partyId,
-        number,
-        date: date ? new Date(date) : new Date(),
-        dueDate: dueDate ? new Date(dueDate) : null,
-        notes: notes || null,
-        subTotal: +subTotal.toFixed(2),
-        cgstTotal: +cgstTotal.toFixed(2),
-        sgstTotal: +sgstTotal.toFixed(2),
-        igstTotal: +igstTotal.toFixed(2),
-        taxTotal,
-        discount: invDiscount,
-        roundOff: invRoundOff,
-        tdsRate: tdsRateNum,
-        tdsAmount,
-        grandTotal,
-        isInterState,
-        status: "UNPAID",
-        items: { create: computedItems },
-      },
+  try {
+    const invoice = await createInvoice({
+      companyId: company.id,
+      userId: ctx.user.id,
+      partyId: input.partyId,
+      date: input.date,
+      dueDate: input.dueDate ?? null,
+      notes: input.notes ?? null,
+      lines: input.items,
+      invoiceDiscount: input.discount,
+      additionalCharges: input.additionalCharges,
+      additionalChargesGstRate: input.additionalChargesGstRate,
+      reverseCharge: input.reverseCharge,
+      tdsRate: input.tdsRate,
+      placeOfSupply: input.placeOfSupply ?? null,
     });
 
-    // Stock OUT for items linked to inventory
-    for (const it of computedItems) {
-      if (it.itemId) {
-        await tx.item.update({
-          where: { id: it.itemId },
-          data: { currentStock: { decrement: it.quantity } },
-        });
-        await tx.stockMovement.create({
-          data: {
-            companyId: company.id,
-            itemId: it.itemId,
-            type: "OUT",
-            quantity: it.quantity,
-            reference: number,
-            notes: `Sale: ${number}`,
-          },
-        });
-      }
+    await logAudit({
+      companyId: company.id,
+      userId: ctx.user.id,
+      action: "CREATE",
+      entity: "Invoice",
+      entityId: invoice.id,
+      changes: { number: invoice.number, grandTotalPaise: invoice.grandTotalPaise },
+    });
+
+    return NextResponse.json(invoice);
+  } catch (e) {
+    if (e instanceof ValidationError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
     }
-    return created;
-  });
-
-  await logAudit({
-    companyId: company.id,
-    userId: ctx.user.id,
-    action: "CREATE",
-    entity: "Invoice",
-    entityId: invoice.id,
-    changes: { number: invoice.number, grandTotal: invoice.grandTotal },
-  });
-
-  return NextResponse.json(invoice);
+    if (e instanceof PeriodLockedError) {
+      return NextResponse.json({ error: e.message }, { status: 409 });
+    }
+    console.error("[invoices] create failed:", e);
+    return NextResponse.json({ error: "Could not create the invoice" }, { status: 500 });
+  }
 }

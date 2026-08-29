@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { Plus, Eye } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 
@@ -82,7 +82,7 @@ export default async function CreditNotesPage() {
                     <td>{n.party.name}</td>
                     <td className="text-xs">{n.originalRef || "—"}</td>
                     <td className="text-xs">{n.reason || "—"}</td>
-                    <td className="text-right font-semibold">{formatINR(n.grandTotal)}</td>
+                    <td className="text-right font-semibold">{formatPaise(n.grandTotalPaise)}</td>
                     <td>
                       <Link href={`/credit-notes/${n.id}`} className="btn-ghost p-2">
                         <Eye className="h-4 w-4" />

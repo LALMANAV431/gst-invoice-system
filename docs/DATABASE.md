@@ -1,5 +1,10 @@
 # Database
 
+> **Status:** the paise migration and the double-entry schema described below are
+> **implemented**. This document now describes the current schema and records the reasoning,
+> rather than proposing future work. Remaining schema work is in
+> [`ROADMAP.md`](ROADMAP.md) Phase 3 (PostgreSQL, `BigInt` for cumulative columns).
+
 ## Current schema
 
 Prisma 5 on SQLite. 27 models. Full definition in `prisma/schema.prisma`.
@@ -48,7 +53,7 @@ Already present and well chosen:
 
 ---
 
-## Change 1 — money columns to integer paise
+## Money columns: integer paise ✅ implemented
 
 **The problem:** 93 `Float` columns hold monetary values. Verified consequence — accumulating
 100 lines of `3 x ₹33.33` yields `9998.999999999984` instead of `9999`.
@@ -115,7 +120,7 @@ record. Correct them with credit notes where the amounts materially differ.
 
 ---
 
-## Change 2 — double-entry accounting
+## Double-entry accounting ✅ implemented
 
 The largest functional gap: there is no ledger. Without double entry there is no arithmetic
 guarantee the books balance, and no trial balance, profit & loss or balance sheet is
@@ -227,7 +232,7 @@ and impossible to add correctly before.
 
 ---
 
-## Change 3 — supporting tables
+## Supporting tables ✅ implemented
 
 ### Numbering counter — fixes the race condition
 
@@ -311,7 +316,7 @@ Required to enforce per-tenant budgets and to know whether AI features are profi
 
 ---
 
-## Additional indexes to add
+## Indexes ✅ added
 
 ```prisma
 // Party lookup by GSTIN — used for duplicate detection and 2B reconciliation

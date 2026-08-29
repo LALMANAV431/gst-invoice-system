@@ -1,8 +1,8 @@
 # Roadmap
 
 Phased plan from the current state to a production-ready accounting SaaS. Ordered by risk,
-not by visible feature count — the correctness work comes first because everything else
-sits on top of it.
+not by visible feature count — correctness work comes first because everything else sits on
+top of it.
 
 Effort estimates assume one experienced full-stack developer.
 
@@ -10,191 +10,175 @@ Effort estimates assume one experienced full-stack developer.
 
 ## Phase 0 — Audit and foundation ✅ **complete**
 
-Delivered in this change.
-
 - [x] Locate the application (it was stranded on a feature branch, not `main`)
 - [x] Full audit with reproduced evidence → [`AUDIT.md`](AUDIT.md)
 - [x] Replace the README, which described a non-existent WordPress plugin
 - [x] Fix `npm run lint` (hung on an interactive prompt; CI lint was a silent no-op)
 - [x] Integer-paise money engine → `src/lib/money.ts`
 - [x] Correct GST engine → `src/lib/gst.ts`
-- [x] 56 tests covering both
 - [x] Fix three checksum-invalid seed GSTINs
 - [x] Docker, Compose, `.dockerignore`, `/api/health` — build and runtime verified
-- [x] Document all ~40 environment variables
-- [x] Honest security posture → [`SECURITY.md`](SECURITY.md)
+- [x] Document all environment variables
 - [x] Architecture, database, API, GST, deployment and business documentation
-
-**Not** done in Phase 0, deliberately: the new engines are **not yet wired into the invoice
-routes**. `src/lib/utils.ts` `calcLineGST` is still in use and still has the defects. A
-partial migration — some totals in paise, others in floats — would be worse than either
-endpoint. That is Phase 1.
 
 ---
 
-## Phase 1 — Correctness and security (3–4 weeks) 🔴 **blocking**
+## Phase 1 — Correctness and security ✅ **complete**
 
-Nothing here is optional. Until it is finished, this application should not keep anyone's
-books of record.
+### 1.1 Money and GST wired in ✅
 
-### 1.1 Wire in the money and GST engines (1 week)
+- [x] Migrated all 93 `Float` money columns to integer paise, suffixed `…Paise`
+- [x] Replaced `calcLineGST` with `computeGstInvoice()` across invoices, purchases,
+      quotations, credit notes, POS and quotation-conversion
+- [x] Added `cessRate`, `cessPerUnitPaise`, `supplyType`, `pricingMode`,
+      `apportionedDiscountPaise` to all line-item models and the invoice form
+- [x] Invoice-level discount apportioned pro-rata **before** tax
+- [x] TDS reported separately; invoice face value no longer reduced
+- [x] Deleted `src/lib/numbering.ts` and `calcLineGST` outright rather than deprecating
+      them, so the old behaviour cannot be reintroduced
+- [x] Extracted logic into `src/server/services/`
+- [x] Live form preview uses the same engine as the server, so the total shown is the total
+      saved
 
-- [ ] Migrate 93 `Float` money columns to integer paise (`…Paise`) — procedure in
-      [`DATABASE.md`](DATABASE.md): add column, backfill, **verify**, then drop
-- [ ] Replace `calcLineGST` with `computeGstInvoice()` in the invoice, purchase,
-      credit-note, quotation and POS routes
-- [ ] Add `cessRate`, `cessPerUnit`, `supplyType`, `pricingMode` to line-item models and forms
-- [ ] Stop netting TDS into `grandTotal`; store it separately
-- [ ] Reconciliation report over historical data to identify invoices affected by the
-      discount-after-tax bug
-- [ ] Extract logic from route handlers into `src/server/services/`
+**Verified:** `₹10,000 @18%` with a `₹1,000` discount now charges `₹1,620` GST, not `₹1,800`.
+Cess, exempt supplies and inclusive pricing all confirmed against the running API.
 
-**Done when:** every invoice satisfies `taxable + tax + roundOff === grandTotal` exactly, and
-a discounted invoice charges GST on the discounted value.
+### 1.2 Security ✅
 
-### 1.2 Security (1 week)
+- [x] Next.js 14.2.18 → 14.2.35; `jspdf` 2.x → 4.x; `vitest` 2.x → 4.x; plus `nanoid`,
+      `js-yaml`, `brace-expansion` — **16 advisories (2 critical) → 5 high, 0 critical**
+- [x] Demo account no longer a super-admin; `npm run db:seed:admin` with password strength rules
+- [x] `src/middleware.ts` — rate limiting, CSRF origin checks, CSP and security headers
+- [x] Zod validation on every write route
+- [x] `Secure` cookie flag in production
+- [x] Session revocation via `User.tokenVersion`
 
-- [ ] Upgrade Next.js within 14.2.x; clear the 2 critical and 8 high advisories
-- [ ] Upgrade `jspdf` (breaking — retest PDF templates) to drop the vulnerable `dompurify`
-- [ ] Stop seeding a super-admin; separate `db:seed` from `db:seed:admin`
-- [ ] `middleware.ts`: rate limiting, CSRF origin check, security headers
-- [ ] Zod validation on all 49 routes
-- [ ] `Secure` cookie flag in production
-- [ ] Server-side session revocation, so logout and user deletion actually invalidate tokens
-- [ ] Upload MIME/size validation
-- [ ] Bound impersonation: expiry, mandatory reason, tenant-visible audit entry
+### 1.3 Data integrity ✅
 
-### 1.3 Data integrity (3–4 days)
+- [x] `DocumentCounter` for atomic, gap-free, financial-year-scoped numbering
+- [x] `FinancialYear` with period locking
+- [x] Pagination on invoice, purchase, quotation, credit-note, payment and expense lists
+- [x] Added indexes: `(companyId, gstin)`, `(companyId, barcode)`,
+      `(companyId, status, dueDate)`, `(companyId, partyId, date)`
+- [x] Payment totals derived from the payments table rather than incremented, so they
+      cannot drift
+- [x] Credit-limit enforcement on invoice creation
 
-- [ ] `DocumentCounter` for atomic, gap-free, financial-year-scoped numbering
-- [ ] `FinancialYear` with period locking, so filed periods cannot be edited
-- [ ] Paginate all list endpoints (`GET /api/invoices` currently returns everything)
-- [ ] Add the indexes listed in [`DATABASE.md`](DATABASE.md)
+**Verified:** five concurrent invoice creations produced five distinct sequential numbers.
 
-### 1.4 PostgreSQL (3–4 days)
+---
+
+## Phase 2 — Real accounting ✅ **core complete**
+
+### 2.1 Double-entry ledger ✅
+
+- [x] `LedgerGroup`, `Ledger`, `JournalEntry`, `JournalEntryLine`
+- [x] Default Indian chart of accounts, seeded per company (19 groups, 22 system ledgers)
+- [x] `src/lib/accounting.ts` — one deterministic posting rule per document type
+- [x] Auto-posting for sales, purchases, receipts, payments, expenses, credit and debit notes
+- [x] `assertBalanced()` refuses to store an unbalanced entry
+- [x] Party control ledgers, so a party's ledger balance and outstanding cannot disagree
+- [x] Blocked-ITC handling: tax becomes cost instead of input credit
+- [x] Sales split across ledgers by supply type, so GSTR-1 grouping is derivable
+
+**Verified:** the seed refuses to finish unless debits equal credits, and reports
+`debits = credits = ₹776,373.30`.
+
+### 2.2 Financial statements ✅
+
+- [x] Trial balance, with a prominent warning when it does not balance
+- [x] Profit & loss, defaulting to the Indian financial year
+- [x] Balance sheet, with current-period profit carried to the equity side
+- [x] GST summary (output vs input tax, the core of GSTR-3B)
+
+### 2.3 Remaining in this phase
+
+- [ ] Manual journal vouchers (UI; the posting layer already supports them)
+- [ ] Cash flow statement
+- [ ] Opening balance entry screen
+- [ ] Drill-down from a statement figure to its source document
+- [ ] Comparative periods
+- [ ] Ledger edit as reverse-and-repost for every document type (see `SECURITY.md` item 7)
+- [ ] Year closing with retained-earnings transfer
+- [ ] Full GSTR-3B, GSTR-2B reconciliation, ITC eligibility classification
+
+---
+
+## Phase 3 — Next.js 16 and PostgreSQL 🔴 **next up**
+
+### 3.1 Next.js 16 upgrade (3–5 days)
+
+The only remaining blocker for a clean `npm audit`.
+
+- [ ] Upgrade `next` and `eslint-config-next` to 16.3.x
+- [ ] Await the now-async request APIs: `cookies()`, `headers()`, route `params`
+- [ ] Re-verify middleware, PWA service worker and the standalone Docker build
+- [ ] Re-run the full suite plus a manual invoice/payment/report pass
+
+Kept separate because it touches every route handler and page; mixing it with tax logic
+would make both changes unreviewable.
+
+### 3.2 PostgreSQL (3–4 days)
 
 - [ ] Switch the provider; adopt `prisma migrate` instead of `db push`
 - [ ] Commit `prisma/migrations/`
-- [ ] Postgres service container in CI; run tests and migrations there
+- [ ] Change cumulative paise columns to `BigInt` (`Int` caps at ~₹2.14 crore on Postgres;
+      SQLite's 64-bit `INTEGER` hides this today)
+- [ ] Postgres service container in CI
 - [ ] Connection pooling
 - [ ] Keep the SQLite schema for the portable USB edition
 
-### 1.5 CI (1 day)
+### 3.3 Testing above the domain layer (1 week)
 
-- [ ] Run `npm test` in CI
-- [ ] Run `npm audit --audit-level=high`
-- [ ] Verify migrations and seed against Postgres
+98 tests cover money, GST and accounting. Nothing covers the HTTP or database layer.
 
----
-
-## Phase 2 — Real accounting (4–5 weeks)
-
-What makes this a Tally alternative rather than an invoicing tool.
-
-### 2.1 Double-entry ledger (2 weeks)
-
-- [ ] `LedgerGroup`, `Ledger`, `JournalEntry`, `JournalEntryLine` (schema in
-      [`DATABASE.md`](DATABASE.md))
-- [ ] Default Indian chart of accounts, seeded per company
-- [ ] `src/lib/accounting.ts` — one deterministic posting rule per document type
-- [ ] Auto-post sales, purchases, payments, expenses, credit and debit notes
-- [ ] Enforce debits = credits inside the transaction **and** as a DB constraint
-- [ ] Manual journal vouchers
-- [ ] Opening balances
-
-**Done when:** every document produces a balanced posting and the trial balance is zero.
-This is only checkable because amounts are integers — which is why Phase 1 comes first.
-
-### 2.2 Financial statements (1 week)
-
-- [ ] Trial balance
-- [ ] Profit & loss
-- [ ] Balance sheet
-- [ ] Cash flow
-- [ ] Drill-down from any figure to its source document
-- [ ] Comparative periods
-
-These become straightforward queries over `JournalEntryLine` once 2.1 exists.
-
-### 2.3 GST returns (1–2 weeks)
-
-- [ ] GSTR-3B
-- [ ] ITC ledger with eligible/ineligible classification
-- [ ] GSTR-2B reconciliation (upload, match, report mismatches)
-- [ ] HSN summary and rate-wise tax report
-- [ ] RCM report
-- [ ] Compliance calendar with filing reminders
-- [ ] CA export package
-
-### 2.4 Year-end (3 days)
-
-- [ ] Year closing with retained-earnings transfer
-- [ ] Carry balances into the new year
-- [ ] Lock closed years
+- [ ] Integration tests per API route against a real database
+- [ ] Auth, RBAC and **cross-tenant isolation** tests — the highest-value gap
+- [ ] Rate limiting and CSRF tests
+- [ ] Invoice → payment → trial-balance flow test
+- [ ] Playwright E2E for invoice creation and the reports
+- [ ] Run tests and `npm audit --audit-level=high` in CI
 
 ---
 
-## Phase 3 — Monetisation (3–4 weeks)
-
-Revenue infrastructure. Nothing here matters until Phases 1–2 make the product trustworthy.
-
-### 3.1 Payments (1.5 weeks)
+## Phase 4 — Monetisation (3–4 weeks)
 
 - [ ] Razorpay subscriptions (test mode first)
 - [ ] **Signature-verified, idempotent** webhooks
-- [ ] Plan upgrade/downgrade with proration
-- [ ] Dunning for failed payments
+- [ ] Plan upgrade/downgrade with proration; dunning for failed payments
 - [ ] GST-compliant invoices for your own subscriptions
-- [ ] Billing history; cancellation flow
-
-### 3.2 Plans and metering (1 week)
-
 - [ ] Extend `src/lib/plan.ts` to the six tiers in [`BUSINESS_MODEL.md`](BUSINESS_MODEL.md)
 - [ ] Usage metering per limit, enforced server-side
-- [ ] Add-on purchase flow
-- [ ] Coupons (partly built), referrals
-
-### 3.3 Marketing surface (1 week)
-
-- [ ] Landing and pricing pages with SEO
-- [ ] Terms, Privacy, Refund, Cookie policies
-- [ ] Onboarding wizard; demo mode
+- [ ] Landing and pricing pages with SEO; Terms, Privacy, Refund, Cookie policies
 - [ ] Revenue dashboard: MRR, ARR, churn, conversion
+- [ ] CA/partner portal with multi-client dashboard and commission tracking
 
-### 3.4 CA / partner portal (1 week)
-
-- [ ] Multi-client dashboard
-- [ ] Client switching; bulk exports
-- [ ] Commission tracking
-
-The CA channel is the highest-leverage distribution available; treat this as a growth
-feature, not an afterthought.
+The CA channel is the highest-leverage distribution available; treat it as a growth feature,
+not an afterthought.
 
 ---
 
-## Phase 4 — AI (2–3 weeks)
+## Phase 5 — AI (2–3 weeks)
 
-Strictly after the fundamentals. AI on top of wrong numbers produces confident wrong
-answers.
+Strictly after the fundamentals. AI on top of wrong numbers produces confident wrong answers.
 
 - [ ] Provider abstraction with `mock` as the default (design in
       [`ARCHITECTURE.md`](ARCHITECTURE.md))
-- [ ] `AiUsageLog`; per-tenant budgets enforced **before** the call
+- [ ] `AiUsageLog` is already in the schema; wire per-tenant budgets enforced **before** the call
 - [ ] Response caching; PII redaction
-- [ ] **Bill OCR** — the highest-value feature; removes the most painful data entry
+- [ ] **Bill OCR** — highest value; removes the most painful data entry
 - [ ] **Natural-language reporting** in Hindi and English ("aaj kitni sale hui?")
 - [ ] Expense categorisation — suggestions only, never auto-posted
-- [ ] GST error detection; duplicate invoice/party detection
-- [ ] Cash-flow and sales forecasting; stock reorder suggestions
+- [ ] GST error detection; duplicate invoice/party detection; forecasting
 
 **Non-negotiable:** AI never writes to the ledger. It proposes; a human approves. Every
 feature degrades cleanly to unavailable when `AI_ENABLED=false`.
 
 ---
 
-## Phase 5 — Depth and scale (ongoing)
+## Phase 6 — Depth and scale (ongoing)
 
-- [ ] Hindi/English i18n with `next-intl` (currently English only despite the claim)
+- [ ] Hindi/English i18n with `next-intl` (currently English only despite the original claim)
 - [ ] E-invoice IRP integration via a GSP (fields already exist)
 - [ ] E-way bill API integration
 - [ ] Offline-first POS with sync
@@ -203,41 +187,43 @@ feature degrades cleanly to unavailable when `AI_ENABLED=false`.
 - [ ] Customer and supplier portals
 - [ ] Public API with keys and rate limits; webhooks
 - [ ] White-label with custom domains
-- [ ] E2E tests (Playwright); background jobs (`pg-boss`); Redis caching
+- [ ] Background jobs (`pg-boss`); Redis caching; 2FA
 
 ---
 
 ## Sequencing rationale
 
-**Why correctness before features.** A missing report is an inconvenience; a wrong tax total
-is a liability that compounds silently. The discount-after-tax bug overcharges GST on every
-discounted invoice — each one a document a customer may dispute and a return that overstates
-liability. Shipping more features on that base multiplies the eventual cleanup.
+**Why correctness came first.** A missing report is an inconvenience; a wrong tax total is a
+liability that compounds silently. The discount-after-tax bug overcharged GST on every
+discounted invoice — each one a document a customer could dispute and a return that
+overstated liability.
 
 **Why paise before double entry.** Double entry's guarantee is that debits equal credits
-exactly. With floating-point amounts, a balanced entry can fail its own balance check for
-reasons that have nothing to do with the accounting. The integer migration makes the
-invariant checkable.
+*exactly*. With floating-point amounts a balanced entry can fail its own balance check for
+reasons unrelated to accounting. The integer migration is what makes the invariant checkable
+— and it is now enforced on every write.
 
-**Why AI last.** AI is the only component whose marginal cost scales with usage, and the only
-one that can confidently produce wrong output. It is also the easiest to sell — which is
+**Why the Next.js upgrade is separate.** It converts the request APIs to async across every
+route and page. Landing it alongside tax logic would mean a diff where a reviewer cannot tell
+a mechanical `await` from a change in how GST is computed.
+
+**Why AI is last.** It is the only component whose marginal cost scales with usage, and the
+only one that can confidently produce wrong output. It is also the easiest to sell — which is
 exactly why it must wait until the numbers underneath it are right.
-
-**Why monetisation before AI.** Subscription revenue funds AI spend. Reversing the order
-means paying for tokens before anyone is paying you.
 
 ---
 
-## Minimum viable production release
+## Current state summary
 
-The smallest scope that can responsibly keep a real business's books:
+**Working and tested:** exact money arithmetic, GST (intra/inter-state, cess, all five supply
+types, RCM, inclusive pricing, discount ordering, round-off, TDS), double-entry ledger with an
+enforced balance invariant, trial balance, P&L, balance sheet, GST summary, atomic gap-free
+numbering, period locking, rate limiting, CSRF, CSP, session revocation, Zod on every write
+route, Docker with a verified runtime.
 
-**Phase 1 in full, plus Phase 2.1 and 2.2.**
+**Before real bookkeeping:** Next.js 16 upgrade (5 open `high` advisories), PostgreSQL with
+versioned migrations, integration and cross-tenant isolation tests, upload validation, and
+ledger reversal on every document edit path.
 
-That yields: correct GST, exact money, real double-entry accounting, trial balance, P&L,
-balance sheet, GSTR-1, secure multi-tenancy, PostgreSQL, and a tested deployment.
-Approximately **7–9 weeks**.
-
-Everything already built — POS, inventory, godowns, quotations, credit notes, bank
-reconciliation, the super-admin panel, PWA, CSV import — comes along for free, because it
-already works. It just needs to sit on arithmetic that reconciles.
+**Estimated:** 2–3 weeks to close Phase 3, at which point the system is defensible as a
+book of record for a small business.

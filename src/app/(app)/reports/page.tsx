@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatNumber } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Receipt, Package, FileSpreadsheet, BookOpen, Users as UsersIcon, Clock, FileJson } from "lucide-react";
+import { formatPaise, formatNumber } from "@/lib/utils";
+import { TrendingUp, TrendingDown, Receipt, Package, FileSpreadsheet, BookOpen, Users as UsersIcon, Clock, FileJson, Scale, LineChart, Landmark, Percent } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -24,23 +24,23 @@ export default async function ReportsPage({
   const [salesAgg, purchaseAgg, gstSales, gstPurchases, items, invoices] = await Promise.all([
     db.invoice.aggregate({
       where: { companyId, date: dateFilter },
-      _sum: { subTotal: true, taxTotal: true, grandTotal: true, cgstTotal: true, sgstTotal: true, igstTotal: true },
+      _sum: { subTotalPaise: true, taxTotalPaise: true, grandTotalPaise: true, cgstTotalPaise: true, sgstTotalPaise: true, igstTotalPaise: true },
       _count: true,
     }),
     db.purchase.aggregate({
       where: { companyId, date: dateFilter },
-      _sum: { subTotal: true, taxTotal: true, grandTotal: true, cgstTotal: true, sgstTotal: true, igstTotal: true },
+      _sum: { subTotalPaise: true, taxTotalPaise: true, grandTotalPaise: true, cgstTotalPaise: true, sgstTotalPaise: true, igstTotalPaise: true },
       _count: true,
     }),
     db.invoiceItem.groupBy({
       by: ["gstRate"],
       where: { invoice: { companyId, date: dateFilter } },
-      _sum: { taxableAmount: true, cgst: true, sgst: true, igst: true },
+      _sum: { taxablePaise: true, cgstPaise: true, sgstPaise: true, igstPaise: true },
     }),
     db.purchaseItem.groupBy({
       by: ["gstRate"],
       where: { purchase: { companyId, date: dateFilter } },
-      _sum: { taxableAmount: true, cgst: true, sgst: true, igst: true },
+      _sum: { taxablePaise: true, cgstPaise: true, sgstPaise: true, igstPaise: true },
     }),
     db.item.findMany({ where: { companyId }, orderBy: { name: "asc" } }),
     db.invoice.findMany({
@@ -51,14 +51,14 @@ export default async function ReportsPage({
     }),
   ]);
 
-  const sales = salesAgg._sum.grandTotal ?? 0;
-  const purchases = purchaseAgg._sum.grandTotal ?? 0;
+  const sales = salesAgg._sum.grandTotalPaise ?? 0;
+  const purchases = purchaseAgg._sum.grandTotalPaise ?? 0;
   const grossProfit = sales - purchases;
-  const totalGSTCollected = (salesAgg._sum.taxTotal ?? 0);
-  const totalGSTPaid = (purchaseAgg._sum.taxTotal ?? 0);
+  const totalGSTCollected = (salesAgg._sum.taxTotalPaise ?? 0);
+  const totalGSTPaid = (purchaseAgg._sum.taxTotalPaise ?? 0);
   const netGST = totalGSTCollected - totalGSTPaid;
 
-  const stockValue = items.reduce((s, i) => s + i.currentStock * i.purchasePrice, 0);
+  const stockValue = items.reduce((s, i) => s + i.currentStock * i.purchasePricePaise, 0);
 
   return (
     <div className="space-y-4">
@@ -75,6 +75,10 @@ export default async function ReportsPage({
           { href: "/reports/ledger", label: "Party Ledger", desc: "Statement of account", icon: UsersIcon, color: "text-violet-600 bg-violet-50" },
           { href: "/reports/outstanding", label: "Outstanding", desc: "Receivables & aging", icon: Clock, color: "text-amber-600 bg-amber-50" },
           { href: "/reports/gstr1", label: "GSTR-1", desc: "B2B, B2C, HSN + JSON", icon: FileJson, color: "text-emerald-600 bg-emerald-50" },
+          { href: "/reports/trial-balance", label: "Trial Balance", desc: "Proves the books balance", icon: Scale, color: "text-sky-600 bg-sky-50" },
+          { href: "/reports/profit-loss", label: "Profit & Loss", desc: "Income vs expenses", icon: LineChart, color: "text-emerald-600 bg-emerald-50" },
+          { href: "/reports/balance-sheet", label: "Balance Sheet", desc: "Assets, liabilities, equity", icon: Landmark, color: "text-indigo-600 bg-indigo-50" },
+          { href: "/reports/gst-summary", label: "GST Summary", desc: "Output vs input tax (3B)", icon: Percent, color: "text-rose-600 bg-rose-50" },
         ].map((r) => (
           <Link key={r.href} href={r.href} className="card card-padding card-hover flex items-start gap-3">
             <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${r.color}`}>
@@ -111,20 +115,20 @@ export default async function ReportsPage({
       </form>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card label="Total Sales" value={formatINR(sales)} icon={TrendingUp} color="emerald" />
+        <Card label="Total Sales" value={formatPaise(sales)} icon={TrendingUp} color="emerald" />
         <Card
           label="Total Purchases"
-          value={formatINR(purchases)}
+          value={formatPaise(purchases)}
           icon={TrendingDown}
           color="rose"
         />
         <Card
           label="Gross Profit"
-          value={formatINR(grossProfit)}
+          value={formatPaise(grossProfit)}
           icon={Receipt}
           color={grossProfit >= 0 ? "emerald" : "rose"}
         />
-        <Card label="Stock Value" value={formatINR(stockValue)} icon={Package} color="brand" />
+        <Card label="Stock Value" value={formatPaise(stockValue)} icon={Package} color="brand" />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
@@ -133,16 +137,16 @@ export default async function ReportsPage({
             <FileSpreadsheet className="h-4 w-4 text-brand-600" /> GST Summary (GSTR-1 / 3B)
           </h2>
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-            <Stat label="Output GST collected" value={formatINR(totalGSTCollected)} green />
-            <Stat label="Input GST paid" value={formatINR(totalGSTPaid)} />
+            <Stat label="Output GST collected" value={formatPaise(totalGSTCollected)} green />
+            <Stat label="Input GST paid" value={formatPaise(totalGSTPaid)} />
             <Stat
               label="Net GST payable"
-              value={formatINR(Math.max(0, netGST))}
+              value={formatPaise(Math.max(0, netGST))}
               green={netGST <= 0}
             />
             <Stat
               label="ITC carried forward"
-              value={formatINR(Math.max(0, -netGST))}
+              value={formatPaise(Math.max(0, -netGST))}
             />
           </div>
 
@@ -168,10 +172,10 @@ export default async function ReportsPage({
                 gstSales.map((r) => (
                   <tr key={r.gstRate}>
                     <td>{r.gstRate}%</td>
-                    <td className="text-right">{formatINR(r._sum.taxableAmount ?? 0)}</td>
-                    <td className="text-right">{formatINR(r._sum.cgst ?? 0)}</td>
-                    <td className="text-right">{formatINR(r._sum.sgst ?? 0)}</td>
-                    <td className="text-right">{formatINR(r._sum.igst ?? 0)}</td>
+                    <td className="text-right">{formatPaise(r._sum.taxablePaise ?? 0)}</td>
+                    <td className="text-right">{formatPaise(r._sum.cgstPaise ?? 0)}</td>
+                    <td className="text-right">{formatPaise(r._sum.sgstPaise ?? 0)}</td>
+                    <td className="text-right">{formatPaise(r._sum.igstPaise ?? 0)}</td>
                   </tr>
                 ))
               )}
@@ -187,7 +191,7 @@ export default async function ReportsPage({
             <div className="border-t border-slate-200 pt-2 flex justify-between font-semibold">
               <span>Gross Profit</span>
               <span className={grossProfit >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                {formatINR(grossProfit)}
+                {formatPaise(grossProfit)}
               </span>
             </div>
           </div>
@@ -208,7 +212,7 @@ export default async function ReportsPage({
                   <td className="text-right">
                     {formatNumber(i.currentStock, 0)} {i.unit}
                   </td>
-                  <td className="text-right">{formatINR(i.currentStock * i.purchasePrice)}</td>
+                  <td className="text-right">{formatPaise(i.currentStock * i.purchasePricePaise)}</td>
                 </tr>
               ))}
             </tbody>
@@ -240,9 +244,9 @@ export default async function ReportsPage({
                   </td>
                   <td>{new Date(i.date).toLocaleDateString("en-IN")}</td>
                   <td>{i.party.name}</td>
-                  <td className="text-right">{formatINR(i.subTotal)}</td>
-                  <td className="text-right">{formatINR(i.taxTotal)}</td>
-                  <td className="text-right font-semibold">{formatINR(i.grandTotal)}</td>
+                  <td className="text-right">{formatPaise(i.subTotalPaise)}</td>
+                  <td className="text-right">{formatPaise(i.taxTotalPaise)}</td>
+                  <td className="text-right font-semibold">{formatPaise(i.grandTotalPaise)}</td>
                 </tr>
               ))}
             </tbody>
@@ -300,7 +304,7 @@ function PLRow({ label, value, pos }: { label: string; value: number; pos?: bool
     <div className="flex justify-between">
       <span className="text-slate-600">{label}</span>
       <span className={pos ? "text-emerald-700 font-medium" : "text-rose-700 font-medium"}>
-        {formatINR(value)}
+        {formatPaise(value)}
       </span>
     </div>
   );

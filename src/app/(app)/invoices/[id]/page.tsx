@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { notFound } from "next/navigation";
-import { formatDate, formatINR, numberToWords } from "@/lib/utils";
+import { formatDate, formatPaise, numberToWords } from "@/lib/utils";
 import InvoiceActions from "./InvoiceActions";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -151,13 +151,13 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
                   <td className="py-2 px-3 text-right">
                     {it.quantity} {it.unit}
                   </td>
-                  <td className="py-2 px-3 text-right">{formatINR(it.rate)}</td>
-                  <td className="py-2 px-3 text-right">{formatINR(it.taxableAmount)}</td>
+                  <td className="py-2 px-3 text-right">{formatPaise(it.ratePaise)}</td>
+                  <td className="py-2 px-3 text-right">{formatPaise(it.taxablePaise)}</td>
                   <td className="py-2 px-3 text-right">{it.gstRate}%</td>
                   <td className="py-2 px-3 text-right">
-                    {formatINR(it.cgst + it.sgst + it.igst)}
+                    {formatPaise(it.cgstPaise + it.sgstPaise + it.igstPaise)}
                   </td>
-                  <td className="py-2 px-3 text-right font-semibold">{formatINR(it.total)}</td>
+                  <td className="py-2 px-3 text-right font-semibold">{formatPaise(it.totalPaise)}</td>
                 </tr>
               ))}
             </tbody>
@@ -167,7 +167,7 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
         <div className="grid md:grid-cols-2 gap-6 pt-4 border-t border-slate-200">
           <div>
             <p className="text-xs uppercase font-semibold text-slate-500">Amount in Words</p>
-            <p className="text-sm mt-1 italic">{numberToWords(invoice.grandTotal)}</p>
+            <p className="text-sm mt-1 italic">{numberToWords(invoice.grandTotalPaise)}</p>
             {invoice.notes && (
               <>
                 <p className="text-xs uppercase font-semibold text-slate-500 mt-4">Notes</p>
@@ -176,34 +176,34 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
             )}
           </div>
           <div className="text-sm">
-            <Row label="Subtotal" value={formatINR(invoice.subTotal)} />
+            <Row label="Subtotal" value={formatPaise(invoice.subTotalPaise)} />
             {invoice.isInterState ? (
-              <Row label="IGST" value={formatINR(invoice.igstTotal)} />
+              <Row label="IGST" value={formatPaise(invoice.igstTotalPaise)} />
             ) : (
               <>
-                <Row label="CGST" value={formatINR(invoice.cgstTotal)} />
-                <Row label="SGST" value={formatINR(invoice.sgstTotal)} />
+                <Row label="CGST" value={formatPaise(invoice.cgstTotalPaise)} />
+                <Row label="SGST" value={formatPaise(invoice.sgstTotalPaise)} />
               </>
             )}
-            {invoice.discount > 0 && (
-              <Row label="Discount" value={`- ${formatINR(invoice.discount)}`} />
+            {invoice.discountPaise > 0 && (
+              <Row label="Discount" value={`- ${formatPaise(invoice.discountPaise)}`} />
             )}
-            {invoice.tdsAmount > 0 && (
-              <Row label={`TDS (${invoice.tdsRate}%)`} value={`- ${formatINR(invoice.tdsAmount)}`} />
+            {invoice.tdsPaise > 0 && (
+              <Row label={`TDS (${invoice.tdsRate}%)`} value={`- ${formatPaise(invoice.tdsPaise)}`} />
             )}
-            {invoice.roundOff !== 0 && (
-              <Row label="Round off" value={formatINR(invoice.roundOff)} />
+            {invoice.roundOffPaise !== 0 && (
+              <Row label="Round off" value={formatPaise(invoice.roundOffPaise)} />
             )}
             <div className="flex justify-between border-t border-slate-200 mt-2 pt-2 font-bold text-lg">
               <span>Grand Total</span>
-              <span>{formatINR(invoice.grandTotal)}</span>
+              <span>{formatPaise(invoice.grandTotalPaise)}</span>
             </div>
-            {invoice.amountPaid > 0 && (
+            {invoice.amountPaidPaise > 0 && (
               <>
-                <Row label="Paid" value={formatINR(invoice.amountPaid)} />
+                <Row label="Paid" value={formatPaise(invoice.amountPaidPaise)} />
                 <Row
                   label="Balance"
-                  value={formatINR(invoice.grandTotal - invoice.amountPaid)}
+                  value={formatPaise(invoice.grandTotalPaise - invoice.amountPaidPaise)}
                 />
               </>
             )}
@@ -220,11 +220,11 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
                 {company.bankIfsc && <p>IFSC: {company.bankIfsc}</p>}
               </div>
             )}
-            {company.upiId && invoice.grandTotal - invoice.amountPaid > 0 && (
+            {company.upiId && invoice.grandTotalPaise - invoice.amountPaidPaise > 0 && (
               <UpiQr
                 upiId={company.upiId}
                 payeeName={company.name}
-                amount={invoice.grandTotal - invoice.amountPaid}
+                amount={invoice.grandTotalPaise - invoice.amountPaidPaise}
                 note={invoice.number}
               />
             )}

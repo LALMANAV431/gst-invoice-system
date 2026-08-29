@@ -288,9 +288,9 @@ PostgreSQL.
 
 ---
 
-## Section 5 — Immediate repair checklist
+## Section 5 — Repair checklist
 
-Ordered by risk. Items marked **done** are included in this change.
+Ordered by risk. Status reflects the current state of the branch.
 
 | # | Item | Status |
 |---|---|---|
@@ -304,24 +304,50 @@ Ordered by risk. Items marked **done** are included in this change.
 | 8 | Add Docker + compose + health check | **done** |
 | 9 | Document every environment variable | **done** |
 | 10 | Document the security posture honestly | **done** — `SECURITY.md` |
-| 11 | **Wire the new engines into the invoice/purchase/credit-note routes** | Phase 1 |
-| 12 | **Migrate 93 `Float` columns to integer paise** | Phase 1 |
-| 13 | **Upgrade Next.js; clear critical advisories** | Phase 1 |
-| 14 | **Stop seeding a super-admin demo account** | Phase 1 |
-| 15 | **Add rate limiting + Zod on all routes** | Phase 1 |
-| 16 | **Fix the invoice numbering race** | Phase 1 |
-| 17 | Migrate SQLite → PostgreSQL | Phase 1 |
-| 18 | Build the double-entry ledger, trial balance, P&L, balance sheet | Phase 2 |
+| 11 | Wire the new engines into the invoice/purchase/quotation/credit-note/POS routes | **done** |
+| 12 | Migrate 93 `Float` columns to integer paise | **done** |
+| 13 | Clear critical dependency advisories | **done** — 2 critical → 0 |
+| 14 | Stop seeding a super-admin demo account | **done** — `db:seed:admin` |
+| 15 | Rate limiting + Zod on all write routes | **done** |
+| 16 | Fix the invoice numbering race | **done** — `DocumentCounter` |
+| 17 | Build the double-entry ledger, trial balance, P&L, balance sheet | **done** |
+| 18 | **Upgrade Next.js 14 → 16** | Phase 3 — 5 `high` advisories remain |
+| 19 | **Migrate SQLite → PostgreSQL** | Phase 3 |
+| 20 | **Integration + cross-tenant isolation tests** | Phase 3 |
 
 ---
 
-## Scope note
+## Section 6 — What was fixed, and how it was verified
 
-Items 11–12 were deliberately **not** attempted here. Rewiring money handling touches 27
-models and 49 routes and requires a data migration; done partially it would leave the
-system in a worse state than either endpoint — some totals in paise, others in floats, none
-reconciling. The engine and its tests land first so the migration that follows has a
-verified foundation and a clear diff.
+Each fix was confirmed against the running application, not only by tests.
 
-`src/lib/utils.ts` `calcLineGST` is therefore still in use and still has defects C2–C6.
-It is left in place, untouched, until the migration replaces its call sites.
+| Defect | Fix | Verified |
+|---|---|---|
+| C1 float money | 93 columns → integer paise; `money.ts` throws on fractional input | 100 × `3 × ₹33.33` sums to exactly `₹9,999` |
+| C2 discount after tax | Apportioned pro-rata **before** tax in `computeGstInvoice()` | Live API: `₹10,000 @18%` less `₹1,000` → GST `₹1,620`, total `₹10,620` |
+| C3 no cess | `cessRate` + `cessPerUnit`, own ledger bucket | Live API: `₹1,000 @28% + 12%` → cess `₹120`, total `₹1,400` |
+| C4 supply types | Explicit `SupplyType`, preserved per line, routed to separate sales ledgers | Live API: exempt line → tax `₹0`, value intact |
+| C5 TDS netted in | `grandTotalPaise` untouched; `tdsPaise` + `expectedReceiptPaise` separate | Unit + form display |
+| C6 odd-paise split | `splitPaise()` distributes the remainder and always reconciles | Property test across amounts and part counts |
+| C7 invalid seed GSTINs | Corrected; mod-36 checksum validator added | Validator reproduces two independently published valid GSTINs |
+| C8 numbering race | `DocumentCounter` incremented inside the transaction, FY-scoped | 5 concurrent creates → 5 distinct sequential numbers |
+| C9 no double entry | Full ledger, chart of accounts, posting rules, `assertBalanced()` | Seed aborts unless debits = credits; reports `₹776,373.30` both sides |
+| S1 advisories | Next 14.2.35, jspdf 4.x, vitest 4.x, nanoid, js-yaml, brace-expansion | 16 advisories (2 critical) → 5 high, 0 critical |
+| S2 demo super-admin | Seed creates a tenant admin; `db:seed:admin` is explicit | Seed output states no super-admin was created |
+| S3 no rate limiting | Per IP+email on login, per IP elsewhere | 6th bad login → `429` |
+| S4 unvalidated bodies | Zod on every write route | Empty body → `400` with field-level issues |
+| S5 no CSRF check | Origin/Referer verified in middleware | Cross-origin POST → `403` |
+| S6 no revocation | `User.tokenVersion` checked per request | Unit-level; bumping invalidates existing tokens |
+| S9 insecure cookie | `secure: true` in production | — |
+| S10 no headers | CSP, XFO, XCTO, Referrer-Policy, Permissions-Policy, HSTS | Confirmed on `/login` response headers |
+
+Two further bugs were found while doing this work and fixed:
+
+- **`numberToWords(invoice.grandTotalPaise)`** in the PDF generator printed the amount in
+  words 100× too large while the figures beside it were correct — on a legal document.
+- **`LEDGER.CAPITAL` pointed at `"Capital Account"`**, which is a *group* name with no
+  matching ledger, so opening-capital postings failed to resolve. Caught by the seed's own
+  balance check. A test now asserts no ledger reuses a group name.
+
+The GSTR-1 JSON export was also corrected: it emitted `+value.toFixed(2)` on columns that now
+hold paise, which would have overstated every filed figure by 100×.

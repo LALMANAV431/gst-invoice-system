@@ -118,11 +118,11 @@ import { db } from "./db";
  * Merge DB PlanSetting overrides on top of the hardcoded PLANS defaults.
  * Lets the SaaS owner edit prices/limits from the admin dashboard.
  */
-export async function getEffectivePlans(): Promise<Record<PlanId, PlanConfig & { priceAnnual: number }>> {
-  const defaults: Record<PlanId, PlanConfig & { priceAnnual: number }> = {
-    FREE: { ...PLANS.FREE, priceAnnual: 0 },
-    BASIC: { ...PLANS.BASIC, priceAnnual: 2990 },
-    PREMIUM: { ...PLANS.PREMIUM, priceAnnual: 9990 },
+export async function getEffectivePlans(): Promise<Record<PlanId, PlanConfig & { priceAnnualPaise: number }>> {
+  const defaults: Record<PlanId, PlanConfig & { priceAnnualPaise: number }> = {
+    FREE: { ...PLANS.FREE, priceAnnualPaise: 0 },
+    BASIC: { ...PLANS.BASIC, priceAnnualPaise: 2990 },
+    PREMIUM: { ...PLANS.PREMIUM, priceAnnualPaise: 9990 },
   };
   try {
     const rows = await db.planSetting.findMany();
@@ -133,8 +133,8 @@ export async function getEffectivePlans(): Promise<Record<PlanId, PlanConfig & {
         ...defaults[id],
         name: r.name ?? defaults[id].name,
         tagline: r.tagline ?? defaults[id].tagline,
-        price: r.priceMonthly,
-        priceAnnual: r.priceAnnual,
+        price: r.priceMonthlyPaise,
+        priceAnnualPaise: r.priceAnnualPaise,
         invoiceLimit: r.invoiceLimit < 0 ? Infinity : r.invoiceLimit,
         userLimit: r.userLimit,
       };

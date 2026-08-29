@@ -16,7 +16,7 @@ type PartyInput = {
   state?: string | null;
   stateCode?: string | null;
   pincode?: string | null;
-  openingBalance?: number;
+  openingBalancePaise?: number;
   balanceType?: string;
 };
 
@@ -27,7 +27,7 @@ export default function PartyForm({ initial }: { initial?: PartyInput }) {
       name: "",
       type: "CUSTOMER",
       balanceType: "RECEIVABLE",
-      openingBalance: 0,
+      openingBalancePaise: 0,
     }
   );
   const [loading, setLoading] = useState(false);
@@ -161,8 +161,8 @@ export default function PartyForm({ initial }: { initial?: PartyInput }) {
             type="number"
             step="0.01"
             className="input"
-            value={form.openingBalance ?? 0}
-            onChange={(e) => set("openingBalance", parseFloat(e.target.value) || 0)}
+            value={form.openingBalancePaise ?? 0}
+            onChange={(e) => set("openingBalancePaise", parseFloat(e.target.value) || 0)}
           />
         </div>
         <div>

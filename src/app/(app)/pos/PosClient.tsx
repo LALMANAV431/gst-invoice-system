@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import dynamic from "next/dynamic";
 import { ScanLine, Plus, Minus, Trash2, Search, ShoppingCart, X } from "lucide-react";
-import { calcLineGST, formatINR } from "@/lib/utils";
+import { formatPaise, toRupees } from "@/lib/money";
+import { computeGstInvoice, SupplyType } from "@/lib/gst";
 
 const BarcodeScanner = dynamic(() => import("@/components/BarcodeScanner"), { ssr: false });
 
@@ -15,7 +16,10 @@ type Item = {
   barcode: string | null;
   hsn: string | null;
   unit: string;
-  salePrice: number;
+  salePricePaise: number;
+  cessRate?: number;
+  supplyType?: string;
+  pricingMode?: string;
   gstRate: number;
   currentStock: number;
 };
@@ -39,11 +43,6 @@ export default function PosClient({
   const [saving, setSaving] = useState(false);
 
   const selectedParty = parties.find((p) => p.id === partyId) || null;
-  const isInterState = !!(
-    companyStateCode &&
-    selectedParty?.stateCode &&
-    companyStateCode !== selectedParty.stateCode
-  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -91,23 +90,33 @@ export default function PosClient({
   }
 
   const totals = useMemo(() => {
-    let sub = 0,
-      tax = 0,
-      grand = 0;
-    for (const l of cart) {
-      const r = calcLineGST({
+    if (cart.length === 0) return { sub: 0, tax: 0, grand: 0, roundOff: 0 };
+    const gst = computeGstInvoice({
+      // Pass the real state codes so the engine decides intra vs inter-state
+      // itself, exactly as the server will. When a walk-in customer has no
+      // recorded state the engine falls back to intra-state, which is the
+      // right default for a counter sale.
+      supplierStateCode: companyStateCode,
+      placeOfSupplyStateCode: selectedParty?.stateCode ?? companyStateCode,
+      lines: cart.map((l) => ({
         quantity: l.qty,
-        rate: l.item.salePrice,
-        discount: 0,
+        // Item prices are stored in paise; the engine takes rupees.
+        rate: toRupees(l.item.salePricePaise),
         gstRate: l.item.gstRate,
-        isInterState,
-      });
-      sub += r.taxableAmount;
-      tax += r.cgst + r.sgst + r.igst;
-      grand += r.total;
-    }
-    return { sub: +sub.toFixed(2), tax: +tax.toFixed(2), grand: +grand.toFixed(2) };
-  }, [cart, isInterState]);
+        cessRate: l.item.cessRate ?? 0,
+        supplyType: (l.item.supplyType as SupplyType) ?? "TAXABLE",
+        // Retail counters price at MRP, which already includes GST.
+        pricingMode: l.item.pricingMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE",
+      })),
+      roundToNearestRupee: true,
+    });
+    return {
+      sub: gst.taxablePaise,
+      tax: gst.taxPaise,
+      grand: gst.grandTotalPaise,
+      roundOff: gst.roundOffPaise,
+    };
+  }, [cart, companyStateCode, selectedParty?.stateCode]);
 
   async function checkout() {
     if (!partyId) return toast.error("Select a customer");
@@ -124,9 +133,12 @@ export default function PosClient({
           hsn: l.item.hsn,
           quantity: l.qty,
           unit: l.item.unit,
-          rate: l.item.salePrice,
+          rate: toRupees(l.item.salePricePaise),
           discount: 0,
           gstRate: l.item.gstRate,
+          cessRate: l.item.cessRate ?? 0,
+          supplyType: l.item.supplyType ?? "TAXABLE",
+          pricingMode: l.item.pricingMode ?? "EXCLUSIVE",
         })),
       }),
     });
@@ -183,7 +195,7 @@ export default function PosClient({
                   <div className="text-xs text-slate-400 mt-0.5">
                     {it.currentStock} {it.unit} in stock
                   </div>
-                  <div className="mt-1 font-bold text-brand-600">{formatINR(it.salePrice)}</div>
+                  <div className="mt-1 font-bold text-brand-600">{formatPaise(it.salePricePaise)}</div>
                 </button>
               ))}
             </div>
@@ -218,7 +230,7 @@ export default function PosClient({
                   >
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{l.item.name}</div>
-                      <div className="text-xs text-slate-400">{formatINR(l.item.salePrice)} each</div>
+                      <div className="text-xs text-slate-400">{formatPaise(l.item.salePricePaise)} each</div>
                     </div>
                     <div className="flex items-center gap-1">
                       <button className="btn-ghost p-1" onClick={() => setQty(l.item.id, l.qty - 1)}>
@@ -234,7 +246,7 @@ export default function PosClient({
                       </button>
                     </div>
                     <div className="w-20 text-right text-sm font-semibold">
-                      {formatINR(l.item.salePrice * l.qty)}
+                      {formatPaise(Math.round(l.item.salePricePaise * l.qty))}
                     </div>
                     <button className="btn-ghost p-1 text-rose-600" onClick={() => setQty(l.item.id, 0)}>
                       <Trash2 className="h-3.5 w-3.5" />
@@ -248,15 +260,15 @@ export default function PosClient({
           <div className="border-t border-slate-200 dark:border-slate-800 pt-3 mt-3 space-y-1 text-sm">
             <div className="flex justify-between">
               <span className="text-slate-500">Subtotal</span>
-              <span>{formatINR(totals.sub)}</span>
+              <span>{formatPaise(totals.sub)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">GST</span>
-              <span>{formatINR(totals.tax)}</span>
+              <span>{formatPaise(totals.tax)}</span>
             </div>
             <div className="flex justify-between font-bold text-lg">
               <span>Total</span>
-              <span>{formatINR(totals.grand)}</span>
+              <span>{formatPaise(totals.grand)}</span>
             </div>
             <div className="flex gap-2 pt-2">
               {cart.length > 0 && (
@@ -265,7 +277,7 @@ export default function PosClient({
                 </button>
               )}
               <button disabled={saving || cart.length === 0} className="btn-primary flex-1" onClick={checkout}>
-                {saving ? "Saving..." : `Complete Sale · ${formatINR(totals.grand)}`}
+                {saving ? "Saving..." : `Complete Sale · ${formatPaise(totals.grand)}`}
               </button>
             </div>
           </div>

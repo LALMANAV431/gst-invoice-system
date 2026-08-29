@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { notFound } from "next/navigation";
-import { formatDate, formatINR, numberToWords } from "@/lib/utils";
+import { formatDate, formatPaise, numberToWords } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import QuotationActions from "./QuotationActions";
@@ -80,10 +80,10 @@ export default async function QuotationDetailPage({ params }: { params: { id: st
                   <td className="py-2 px-3 text-right">
                     {it.quantity} {it.unit}
                   </td>
-                  <td className="py-2 px-3 text-right">{formatINR(it.rate)}</td>
-                  <td className="py-2 px-3 text-right">{formatINR(it.taxableAmount)}</td>
+                  <td className="py-2 px-3 text-right">{formatPaise(it.ratePaise)}</td>
+                  <td className="py-2 px-3 text-right">{formatPaise(it.taxablePaise)}</td>
                   <td className="py-2 px-3 text-right">{it.gstRate}%</td>
-                  <td className="py-2 px-3 text-right font-semibold">{formatINR(it.total)}</td>
+                  <td className="py-2 px-3 text-right font-semibold">{formatPaise(it.totalPaise)}</td>
                 </tr>
               ))}
             </tbody>
@@ -93,7 +93,7 @@ export default async function QuotationDetailPage({ params }: { params: { id: st
         <div className="grid md:grid-cols-2 gap-6 pt-4 border-t border-slate-200">
           <div>
             <p className="text-xs uppercase font-semibold text-slate-500">Amount in Words</p>
-            <p className="text-sm mt-1 italic">{numberToWords(q.grandTotal)}</p>
+            <p className="text-sm mt-1 italic">{numberToWords(q.grandTotalPaise)}</p>
             {q.notes && (
               <>
                 <p className="text-xs uppercase font-semibold text-slate-500 mt-4">Notes</p>
@@ -102,19 +102,19 @@ export default async function QuotationDetailPage({ params }: { params: { id: st
             )}
           </div>
           <div className="text-sm">
-            <Row label="Subtotal" value={formatINR(q.subTotal)} />
+            <Row label="Subtotal" value={formatPaise(q.subTotalPaise)} />
             {q.isInterState ? (
-              <Row label="IGST" value={formatINR(q.igstTotal)} />
+              <Row label="IGST" value={formatPaise(q.igstTotalPaise)} />
             ) : (
               <>
-                <Row label="CGST" value={formatINR(q.cgstTotal)} />
-                <Row label="SGST" value={formatINR(q.sgstTotal)} />
+                <Row label="CGST" value={formatPaise(q.cgstTotalPaise)} />
+                <Row label="SGST" value={formatPaise(q.sgstTotalPaise)} />
               </>
             )}
-            {q.discount > 0 && <Row label="Discount" value={`- ${formatINR(q.discount)}`} />}
+            {q.discountPaise > 0 && <Row label="Discount" value={`- ${formatPaise(q.discountPaise)}`} />}
             <div className="flex justify-between border-t border-slate-200 mt-2 pt-2 font-bold text-lg">
               <span>Grand Total</span>
-              <span>{formatINR(q.grandTotal)}</span>
+              <span>{formatPaise(q.grandTotalPaise)}</span>
             </div>
           </div>
         </div>

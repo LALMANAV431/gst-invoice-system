@@ -1,134 +1,215 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { calcLineGST } from "@/lib/utils";
-import { nextCreditNoteNumber } from "@/lib/numbering";
+import { writeGuard } from "@/lib/guard";
+import { logAudit } from "@/lib/audit";
+import { computeDocument } from "@/server/services/document.service";
+import { allocateDocumentNumber, assertPeriodOpen, PeriodLockedError } from "@/server/numbering";
+import {
+  ensureChartOfAccounts,
+  ensurePartyLedger,
+  postJournalEntry,
+} from "@/server/ledger";
+import { buildCreditNotePosting } from "@/lib/accounting";
+import { parsePagination, paginated } from "@/lib/pagination";
+
+const lineSchema = z.object({
+  itemId: z.string().nullish(),
+  itemName: z.string().min(1),
+  hsn: z.string().nullish(),
+  quantity: z.coerce.number().positive(),
+  unit: z.string().optional(),
+  rate: z.union([z.string(), z.number()]),
+  discount: z.union([z.string(), z.number()]).optional(),
+  gstRate: z.coerce.number().min(0).max(100),
+  cessRate: z.coerce.number().min(0).max(500).optional(),
+  cessPerUnit: z.union([z.string(), z.number()]).optional(),
+  supplyType: z.enum(["TAXABLE", "EXEMPT", "NIL_RATED", "NON_GST", "ZERO_RATED"]).optional(),
+  pricingMode: z.enum(["EXCLUSIVE", "INCLUSIVE"]).optional(),
+});
+
+const createSchema = z.object({
+  partyId: z.string().min(1, "Party is required"),
+  kind: z.enum(["CREDIT", "DEBIT"]).optional(),
+  date: z.coerce.date().optional(),
+  reason: z.string().nullish(),
+  originalRef: z.string().nullish(),
+  notes: z.string().nullish(),
+  items: z.array(lineSchema).min(1, "Add at least one item"),
+  discount: z.union([z.string(), z.number()]).optional(),
+  additionalCharges: z.union([z.string(), z.number()]).optional(),
+  reverseCharge: z.coerce.boolean().optional(),
+  placeOfSupply: z.string().nullish(),
+});
 
 export async function GET(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
   const kind = searchParams.get("kind");
-  const where: any = { companyId: ctx.company.id };
-  if (kind) where.kind = kind;
-  const notes = await db.creditNote.findMany({
-    where,
-    include: { party: true },
-    orderBy: { date: "desc" },
-  });
-  return NextResponse.json(notes);
+  const where: { companyId: string; kind?: string } = { companyId: ctx.company.id };
+  if (kind === "CREDIT" || kind === "DEBIT") where.kind = kind;
+
+  const { skip, take, page, pageSize } = parsePagination(req);
+  const [rows, total] = await Promise.all([
+    db.creditNote.findMany({
+      where,
+      include: { party: { select: { id: true, name: true, gstin: true } } },
+      orderBy: { date: "desc" },
+      skip,
+      take,
+    }),
+    db.creditNote.count({ where }),
+  ]);
+
+  return NextResponse.json(paginated(rows, total, page, pageSize));
 }
 
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // This route previously had no write guard.
+  const blocked = writeGuard(ctx);
+  if (blocked) return blocked;
+
   const company = ctx.company;
-  const body = await req.json();
-  const { partyId, kind, date, reason, originalRef, notes, items, discount, roundOff } = body;
 
-  const noteKind = kind === "DEBIT" ? "DEBIT" : "CREDIT";
-  if (!partyId) return NextResponse.json({ error: "Party required" }, { status: 400 });
-  if (!Array.isArray(items) || items.length === 0)
-    return NextResponse.json({ error: "Add at least one item" }, { status: 400 });
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  const party = await db.party.findFirst({ where: { id: partyId, companyId: company.id } });
+  const parsed = createSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Invalid request" },
+      { status: 400 }
+    );
+  }
+  const input = parsed.data;
+  const noteKind = input.kind === "DEBIT" ? "DEBIT" : "CREDIT";
+  const date = input.date ?? new Date();
+
+  const party = await db.party.findFirst({
+    where: { id: input.partyId, companyId: company.id },
+    select: { id: true, name: true, type: true, stateCode: true, balanceType: true },
+  });
   if (!party) return NextResponse.json({ error: "Invalid party" }, { status: 400 });
 
-  const isInterState = !!(
-    company.stateCode &&
-    party.stateCode &&
-    company.stateCode !== party.stateCode
-  );
+  try {
+    await assertPeriodOpen(db, company.id, date);
 
-  let subTotal = 0,
-    cgstTotal = 0,
-    sgstTotal = 0,
-    igstTotal = 0;
-  const computed = items.map((it: any) => {
-    const quantity = parseFloat(it.quantity) || 0;
-    const rate = parseFloat(it.rate) || 0;
-    const itemDiscount = parseFloat(it.discount) || 0;
-    const gstRate = parseFloat(it.gstRate) || 0;
-    const r = calcLineGST({ quantity, rate, discount: itemDiscount, gstRate, isInterState });
-    subTotal += r.taxableAmount;
-    cgstTotal += r.cgst;
-    sgstTotal += r.sgst;
-    igstTotal += r.igst;
-    return {
-      itemId: it.itemId || null,
-      itemName: it.itemName,
-      hsn: it.hsn || null,
-      quantity,
-      unit: it.unit || "NOS",
-      rate,
-      discount: itemDiscount,
-      taxableAmount: r.taxableAmount,
-      gstRate,
-      cgst: r.cgst,
-      sgst: r.sgst,
-      igst: r.igst,
-      total: r.total,
-    };
-  });
-
-  const noteDiscount = parseFloat(discount) || 0;
-  const noteRoundOff = parseFloat(roundOff) || 0;
-  const taxTotal = +(cgstTotal + sgstTotal + igstTotal).toFixed(2);
-  const grandTotal = +(subTotal + taxTotal - noteDiscount + noteRoundOff).toFixed(2);
-  const prefix = noteKind === "DEBIT" ? company.debitNotePrefix : company.creditNotePrefix;
-  const number = await nextCreditNoteNumber(company.id, prefix, noteKind);
-
-  const note = await db.$transaction(async (tx) => {
-    const created = await tx.creditNote.create({
-      data: {
-        companyId: company.id,
-        partyId,
-        number,
-        kind: noteKind,
-        date: date ? new Date(date) : new Date(),
-        reason: reason || null,
-        originalRef: originalRef || null,
-        notes: notes || null,
-        subTotal: +subTotal.toFixed(2),
-        cgstTotal: +cgstTotal.toFixed(2),
-        sgstTotal: +sgstTotal.toFixed(2),
-        igstTotal: +igstTotal.toFixed(2),
-        taxTotal,
-        discount: noteDiscount,
-        roundOff: noteRoundOff,
-        grandTotal,
-        isInterState,
-        items: { create: computed },
-      },
+    const { header, lines } = computeDocument({
+      supplierStateCode: company.stateCode,
+      partyStateCode: party.stateCode,
+      placeOfSupply: input.placeOfSupply,
+      lines: input.items,
+      invoiceDiscount: input.discount,
+      additionalCharges: input.additionalCharges,
+      reverseCharge: input.reverseCharge,
+      roundToNearestRupee: company.roundInvoices,
+      isComposition: company.gstScheme === "COMPOSITION",
     });
 
-    // Stock effects:
-    // CREDIT (sales return) -> goods come back IN
-    // DEBIT (purchase return) -> goods go OUT
-    const movementType = noteKind === "CREDIT" ? "IN" : "OUT";
-    for (const it of computed) {
-      if (it.itemId) {
+    const note = await db.$transaction(async (tx) => {
+      const { number } = await allocateDocumentNumber(tx, {
+        companyId: company.id,
+        documentType: noteKind === "DEBIT" ? "DEBIT" : "CREDIT",
+        prefix: noteKind === "DEBIT" ? company.debitNotePrefix : company.creditNotePrefix,
+        date,
+      });
+
+      const created = await tx.creditNote.create({
+        data: {
+          companyId: company.id,
+          partyId: party.id,
+          number,
+          kind: noteKind,
+          date,
+          reason: input.reason ?? null,
+          originalRef: input.originalRef ?? null,
+          notes: input.notes ?? null,
+          ...header,
+          items: { create: lines },
+        },
+        include: { items: true },
+      });
+
+      // CREDIT (sales return) -> goods come back IN.
+      // DEBIT (purchase return) -> goods go back OUT.
+      const movementType = noteKind === "CREDIT" ? "IN" : "OUT";
+      for (const line of lines) {
+        if (!line.itemId) continue;
         await tx.item.update({
-          where: { id: it.itemId },
+          where: { id: line.itemId },
           data: {
             currentStock:
-              movementType === "IN" ? { increment: it.quantity } : { decrement: it.quantity },
+              movementType === "IN"
+                ? { increment: line.quantity }
+                : { decrement: line.quantity },
           },
         });
         await tx.stockMovement.create({
           data: {
             companyId: company.id,
-            itemId: it.itemId,
+            itemId: line.itemId,
             type: movementType,
-            quantity: it.quantity,
+            quantity: line.quantity,
             reference: number,
             notes: `${noteKind === "CREDIT" ? "Sales return" : "Purchase return"}: ${number}`,
+            date,
           },
         });
       }
-    }
-    return created;
-  });
 
-  return NextResponse.json(note);
+      await ensureChartOfAccounts(tx, company.id);
+      const partyLedger = await ensurePartyLedger(tx, company.id, party);
+
+      const posting = buildCreditNotePosting({
+        partyLedger: partyLedger.name,
+        date,
+        number,
+        creditNoteId: created.id,
+        kind: noteKind,
+        taxablePaise: header.subTotalPaise + header.additionalChargesPaise,
+        cgstPaise: header.cgstTotalPaise,
+        sgstPaise: header.sgstTotalPaise,
+        igstPaise: header.igstTotalPaise,
+        cessPaise: header.cessTotalPaise,
+        roundOffPaise: header.roundOffPaise,
+        grandTotalPaise: header.grandTotalPaise,
+      });
+
+      await postJournalEntry(tx, {
+        companyId: company.id,
+        userId: ctx.user.id,
+        posting,
+        voucherNo: number,
+        journalPrefix: company.journalPrefix,
+      });
+
+      return created;
+    });
+
+    await logAudit({
+      companyId: company.id,
+      userId: ctx.user.id,
+      action: "CREATE",
+      entity: "CreditNote",
+      entityId: note.id,
+      changes: { number: note.number, kind: noteKind, grandTotalPaise: note.grandTotalPaise },
+    });
+
+    return NextResponse.json(note);
+  } catch (e) {
+    if (e instanceof PeriodLockedError) {
+      return NextResponse.json({ error: e.message }, { status: 409 });
+    }
+    console.error("[credit-notes] create failed:", e);
+    return NextResponse.json({ error: "Could not create the note" }, { status: 500 });
+  }
 }

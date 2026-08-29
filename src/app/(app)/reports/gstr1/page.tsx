@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatNumber } from "@/lib/utils";
+import { toRupees } from "@/lib/money";
+import { formatPaise, formatNumber } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
 import Gstr1Export from "./Gstr1Export";
 
@@ -30,30 +31,30 @@ export default async function Gstr1Page({
   const b2b = invoices.filter((i) => i.party.gstin);
   const b2c = invoices.filter((i) => !i.party.gstin);
 
-  const sum = (arr: typeof invoices, key: "subTotal" | "taxTotal" | "grandTotal") =>
+  const sum = (arr: typeof invoices, key: "subTotalPaise" | "taxTotalPaise" | "grandTotalPaise") =>
     arr.reduce((s, i) => s + (i[key] as number), 0);
 
   // HSN summary
   const hsnMap = new Map<
     string,
-    { hsn: string; gstRate: number; qty: number; taxable: number; cgst: number; sgst: number; igst: number; total: number }
+    { hsn: string; gstRate: number; qty: number; taxablePaise: number; cgstPaise: number; sgstPaise: number; igstPaise: number; totalPaise: number }
   >();
   for (const inv of invoices) {
     for (const it of inv.items) {
       const key = `${it.hsn || "NA"}-${it.gstRate}`;
       const cur =
         hsnMap.get(key) ||
-        { hsn: it.hsn || "NA", gstRate: it.gstRate, qty: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, total: 0 };
+        { hsn: it.hsn || "NA", gstRate: it.gstRate, qty: 0, taxablePaise: 0, cgstPaise: 0, sgstPaise: 0, igstPaise: 0, totalPaise: 0 };
       cur.qty += it.quantity;
-      cur.taxable += it.taxableAmount;
-      cur.cgst += it.cgst;
-      cur.sgst += it.sgst;
-      cur.igst += it.igst;
-      cur.total += it.total;
+      cur.taxablePaise += it.taxablePaise;
+      cur.cgstPaise += it.cgstPaise;
+      cur.sgstPaise += it.sgstPaise;
+      cur.igstPaise += it.igstPaise;
+      cur.totalPaise += it.totalPaise;
       hsnMap.set(key, cur);
     }
   }
-  const hsnRows = Array.from(hsnMap.values()).sort((a, b) => b.taxable - a.taxable);
+  const hsnRows = Array.from(hsnMap.values()).sort((a, b) => b.taxablePaise - a.taxablePaise);
 
   const period = `${iso(from)}_${iso(to)}`;
 
@@ -61,25 +62,25 @@ export default async function Gstr1Page({
   const gstr1Json = {
     gstin: company.gstin || "URP",
     fp: `${String(from.getMonth() + 1).padStart(2, "0")}${from.getFullYear()}`,
-    gt: +sum(invoices, "grandTotal").toFixed(2),
-    cur_gt: +sum(invoices, "grandTotal").toFixed(2),
+    gt: +toRupees(sum(invoices, "grandTotalPaise")).toFixed(2),
+    cur_gt: +toRupees(sum(invoices, "grandTotalPaise")).toFixed(2),
     b2b: b2b.map((inv) => ({
       ctin: inv.party.gstin,
       inv: [
         {
           inum: inv.number,
           idt: formatDDMMYYYY(inv.date),
-          val: +inv.grandTotal.toFixed(2),
+          val: +toRupees(inv.grandTotalPaise).toFixed(2),
           pos: inv.party.stateCode || company.stateCode || "",
           rchrg: "N",
           itms: inv.items.map((it, idx) => ({
             num: idx + 1,
             itm_det: {
-              txval: +it.taxableAmount.toFixed(2),
+              txval: +toRupees(it.taxablePaise).toFixed(2),
               rt: it.gstRate,
-              camt: +it.cgst.toFixed(2),
-              samt: +it.sgst.toFixed(2),
-              iamt: +it.igst.toFixed(2),
+              camt: +toRupees(it.cgstPaise).toFixed(2),
+              samt: +toRupees(it.sgstPaise).toFixed(2),
+              iamt: +toRupees(it.igstPaise).toFixed(2),
             },
           })),
         },
@@ -89,10 +90,10 @@ export default async function Gstr1Page({
       sply_ty: inv.isInterState ? "INTER" : "INTRA",
       pos: inv.party.stateCode || company.stateCode || "",
       typ: "OE",
-      txval: +inv.subTotal.toFixed(2),
-      iamt: +inv.igstTotal.toFixed(2),
-      camt: +inv.cgstTotal.toFixed(2),
-      samt: +inv.sgstTotal.toFixed(2),
+      txval: +toRupees(inv.subTotalPaise).toFixed(2),
+      iamt: +toRupees(inv.igstTotalPaise).toFixed(2),
+      camt: +toRupees(inv.cgstTotalPaise).toFixed(2),
+      samt: +toRupees(inv.sgstTotalPaise).toFixed(2),
     })),
     hsn: {
       data: hsnRows.map((h, i) => ({
@@ -100,10 +101,10 @@ export default async function Gstr1Page({
         hsn_sc: h.hsn,
         rt: h.gstRate,
         qty: +h.qty.toFixed(2),
-        txval: +h.taxable.toFixed(2),
-        camt: +h.cgst.toFixed(2),
-        samt: +h.sgst.toFixed(2),
-        iamt: +h.igst.toFixed(2),
+        txval: +toRupees(h.taxablePaise).toFixed(2),
+        camt: +toRupees(h.cgstPaise).toFixed(2),
+        samt: +toRupees(h.sgstPaise).toFixed(2),
+        iamt: +toRupees(h.igstPaise).toFixed(2),
       })),
     },
   };
@@ -134,9 +135,9 @@ export default async function Gstr1Page({
       </form>
 
       <div className="grid sm:grid-cols-3 gap-4">
-        <Stat label="Total Taxable" value={formatINR(sum(invoices, "subTotal"))} />
-        <Stat label="Total Tax" value={formatINR(sum(invoices, "taxTotal"))} />
-        <Stat label="Total Invoice Value" value={formatINR(sum(invoices, "grandTotal"))} />
+        <Stat label="Total Taxable" value={formatPaise(sum(invoices, "subTotalPaise"))} />
+        <Stat label="Total Tax" value={formatPaise(sum(invoices, "taxTotalPaise"))} />
+        <Stat label="Total Invoice Value" value={formatPaise(sum(invoices, "grandTotalPaise"))} />
       </div>
 
       <div className="card card-padding">
@@ -166,9 +167,9 @@ export default async function Gstr1Page({
                     <td className="font-medium">{i.number}</td>
                     <td className="text-xs">{i.party.gstin}</td>
                     <td>{i.party.name}</td>
-                    <td className="text-right">{formatINR(i.subTotal)}</td>
-                    <td className="text-right">{formatINR(i.taxTotal)}</td>
-                    <td className="text-right font-semibold">{formatINR(i.grandTotal)}</td>
+                    <td className="text-right">{formatPaise(i.subTotalPaise)}</td>
+                    <td className="text-right">{formatPaise(i.taxTotalPaise)}</td>
+                    <td className="text-right font-semibold">{formatPaise(i.grandTotalPaise)}</td>
                   </tr>
                 ))
               )}
@@ -206,11 +207,11 @@ export default async function Gstr1Page({
                     <td>{h.hsn}</td>
                     <td className="text-right">{h.gstRate}%</td>
                     <td className="text-right">{formatNumber(h.qty, 0)}</td>
-                    <td className="text-right">{formatINR(h.taxable)}</td>
-                    <td className="text-right">{formatINR(h.cgst)}</td>
-                    <td className="text-right">{formatINR(h.sgst)}</td>
-                    <td className="text-right">{formatINR(h.igst)}</td>
-                    <td className="text-right font-semibold">{formatINR(h.total)}</td>
+                    <td className="text-right">{formatPaise(h.taxablePaise)}</td>
+                    <td className="text-right">{formatPaise(h.cgstPaise)}</td>
+                    <td className="text-right">{formatPaise(h.sgstPaise)}</td>
+                    <td className="text-right">{formatPaise(h.igstPaise)}</td>
+                    <td className="text-right font-semibold">{formatPaise(h.totalPaise)}</td>
                   </tr>
                 ))
               )}

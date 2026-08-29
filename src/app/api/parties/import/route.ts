@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 
 // Bulk import parties from parsed CSV rows.
-// Expected keys (case-insensitive): name, type, gstin, phone, email, city, state, stateCode, openingBalance
+// Expected keys (case-insensitive): name, type, gstin, phone, email, city, state, stateCode, openingBalancePaise
 export async function POST(req: Request) {
   const ctx = await getCurrentUserAndCompany();
   if (!ctx?.company) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
           stateCode:
             (norm(r, "statecode") || "")?.toString() ||
             (gstin ? gstin.slice(0, 2) : null),
-          openingBalance: parseFloat(norm(r, "openingbalance", "balance", "opening")) || 0,
+          openingBalancePaise: parseFloat(norm(r, "openingbalance", "balance", "opening")) || 0,
           balanceType: type === "VENDOR" ? "PAYABLE" : "RECEIVABLE",
         },
       });

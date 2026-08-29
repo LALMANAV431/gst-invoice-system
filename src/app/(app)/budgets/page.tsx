@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import { Plus, PiggyBank } from "lucide-react";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/utils";
 
 const CATEGORIES = [
   "Sales",
@@ -123,7 +123,7 @@ export default function BudgetsPage() {
                     <td>
                       <span className="badge-slate">{b.category}</span>
                     </td>
-                    <td className="text-right font-semibold">{formatINR(b.amount)}</td>
+                    <td className="text-right font-semibold">{formatPaise(b.amount)}</td>
                   </tr>
                 ))
               )}

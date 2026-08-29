@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSuperAdmin } from "@/lib/auth";
+import { toPaise } from "@/lib/money";
 
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
   const admin = await getSuperAdmin();
@@ -11,7 +12,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     data: {
       description: body.description ?? undefined,
       type: body.type ?? undefined,
-      value: body.value != null ? parseFloat(body.value) : undefined,
+      percentOff: body.percentOff != null ? parseFloat(body.percentOff) : undefined,
+      flatOffPaise: body.flatOff != null ? toPaise(body.flatOff) : undefined,
       appliesToPlan: body.appliesToPlan ?? undefined,
       maxRedemptions:
         body.maxRedemptions != null ? parseInt(body.maxRedemptions) || null : undefined,

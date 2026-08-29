@@ -19,7 +19,7 @@ export default async function PosPage() {
         barcode: true,
         hsn: true,
         unit: true,
-        salePrice: true,
+        salePricePaise: true,
         gstRate: true,
         currentStock: true,
       },

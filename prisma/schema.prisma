@@ -1,3 +1,25 @@
+// ============================================================================
+// GST Invoice System - database schema
+//
+// MONEY REPRESENTATION
+// --------------------
+// Every monetary column is an INTEGER NUMBER OF PAISE and is suffixed `Paise`.
+// This is deliberate: the previous schema used `Float` for 93 money columns,
+// which lost money. Accumulating 100 lines of (3 x Rs 33.33) produced
+// 9998.999999999984 instead of 9999.
+//
+// Integers are exact. The `Paise` suffix makes a stray float visible in review.
+// Use the helpers in src/lib/money.ts - never do arithmetic on rupee floats.
+//
+// `Int` in SQLite is a 64-bit INTEGER, so there is no practical ceiling here.
+// On PostgreSQL, `Int` is 32-bit and caps a single column at ~Rs 2.14 crore;
+// switch cumulative columns to `BigInt` when migrating. See docs/DATABASE.md.
+//
+// Rates (gstRate, cessRate, tdsRate) stay `Float` - they are percentages, not
+// money, and 0.25% is a real GST slab.
+// Quantities stay `Float` - 2.5 kg is a legitimate quantity.
+// ============================================================================
+
 generator client {
   provider      = "prisma-client-js"
   // Include Windows + common Linux engines so the build can be packaged
@@ -17,6 +39,9 @@ model User {
   name         String
   role         String   @default("ADMIN") // ADMIN | ACCOUNTANT | OPERATOR | VIEWER
   isSuperAdmin Boolean  @default(false)
+  // Bumped to invalidate every existing JWT for this user (logout-everywhere,
+  // password change, suspension). Checked on each request.
+  tokenVersion Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -59,12 +84,18 @@ model Company {
   creditNotePrefix String @default("CN")
   debitNotePrefix String  @default("DN")
   expensePrefix String   @default("EXP")
+  journalPrefix String   @default("JV")
   financialYear String   @default("2025-26")
   terms         String?
   bankName      String?
   bankAccountNo String?
   bankIfsc      String?
   upiId         String?
+  // REGULAR | COMPOSITION. Composition dealers issue a bill of supply and
+  // cannot collect GST, so this changes document behaviour.
+  gstScheme     String   @default("REGULAR")
+  // Round invoice grand totals to the nearest rupee.
+  roundInvoices Boolean  @default(true)
   plan          String   @default("FREE") // FREE | BASIC | PREMIUM
   planExpiry    DateTime?
   isSuspended   Boolean  @default(false)
@@ -90,6 +121,12 @@ model Company {
   bankTransactions  BankTransaction[]
   budgets        Budget[]
   auditLogs      AuditLog[]
+  ledgerGroups   LedgerGroup[]
+  ledgers        Ledger[]
+  journalEntries JournalEntry[]
+  counters       DocumentCounter[]
+  financialYears FinancialYear[]
+  aiUsageLogs    AiUsageLog[]
 }
 
 model Party {
@@ -105,8 +142,9 @@ model Party {
   state        String?
   pincode      String?
   stateCode    String?
-  openingBalance Float  @default(0)
+  openingBalancePaise Int @default(0)
   balanceType  String   @default("RECEIVABLE") // RECEIVABLE | PAYABLE
+  creditLimitPaise Int  @default(0) // 0 = no limit
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -119,8 +157,10 @@ model Party {
   quotations  Quotation[]
   creditNotes CreditNote[]
   expenses    Expense[]
+  ledger      Ledger?
 
   @@index([companyId])
+  @@index([companyId, gstin])
 }
 
 model Item {
@@ -130,9 +170,15 @@ model Item {
   hsn          String?
   barcode      String?
   unit         String   @default("NOS")
-  salePrice    Float    @default(0)
-  purchasePrice Float   @default(0)
+  salePricePaise     Int @default(0)
+  purchasePricePaise Int @default(0)
   gstRate      Float    @default(18)
+  cessRate     Float    @default(0)
+  cessPerUnitPaise Int  @default(0)
+  // TAXABLE | EXEMPT | NIL_RATED | NON_GST | ZERO_RATED
+  supplyType   String   @default("TAXABLE")
+  // EXCLUSIVE | INCLUSIVE - whether salePrice already contains GST (MRP goods)
+  pricingMode  String   @default("EXCLUSIVE")
   openingStock Float    @default(0)
   currentStock Float    @default(0)
   lowStockAlert Float   @default(0)
@@ -152,6 +198,7 @@ model Item {
   creditNoteItems CreditNoteItem[]
 
   @@index([companyId])
+  @@index([companyId, barcode])
 }
 
 model Invoice {
@@ -160,19 +207,27 @@ model Invoice {
   date          DateTime @default(now())
   dueDate       DateTime?
   notes         String?
-  status        String   @default("UNPAID") // PAID | PARTIAL | UNPAID
-  subTotal      Float    @default(0)
-  cgstTotal     Float    @default(0)
-  sgstTotal     Float    @default(0)
-  igstTotal     Float    @default(0)
-  taxTotal      Float    @default(0)
-  discount      Float    @default(0)
-  roundOff      Float    @default(0)
-  grandTotal    Float    @default(0)
-  amountPaid    Float    @default(0)
+  status        String   @default("UNPAID") // PAID | PARTIAL | UNPAID | CANCELLED
+  subTotalPaise   Int    @default(0)
+  cgstTotalPaise  Int    @default(0)
+  sgstTotalPaise  Int    @default(0)
+  igstTotalPaise  Int    @default(0)
+  cessTotalPaise  Int    @default(0)
+  taxTotalPaise   Int    @default(0)
+  discountPaise   Int    @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int    @default(0)
+  grandTotalPaise Int    @default(0)
+  amountPaidPaise Int    @default(0)
   isInterState  Boolean  @default(false)
+  reverseCharge Boolean  @default(false)
+  // 2-digit GST state code. Stored rather than derived so the invoice can be
+  // reproduced exactly even if the party's address changes later.
+  placeOfSupply String?
   tdsRate       Float    @default(0)
-  tdsAmount     Float    @default(0)
+  tdsPaise      Int      @default(0)
+  cancelledAt   DateTime?
+  cancelReason  String?
   irn           String?
   ackNo         String?
   ackDate       DateTime?
@@ -192,6 +247,7 @@ model Invoice {
 
   @@unique([companyId, number])
   @@index([companyId, date])
+  @@index([companyId, status, dueDate])
 }
 
 model InvoiceItem {
@@ -201,18 +257,28 @@ model InvoiceItem {
   hsn        String?
   quantity   Float
   unit       String  @default("NOS")
-  rate       Float
-  discount   Float   @default(0)
-  taxableAmount Float @default(0)
+  ratePaise     Int
+  discountPaise Int  @default(0)
+  // Share of the invoice-level discount allocated to this line. Stored so the
+  // invoice reproduces exactly even if apportionment logic changes.
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int  @default(0)
   gstRate    Float   @default(0)
-  cgst       Float   @default(0)
-  sgst       Float   @default(0)
-  igst       Float   @default(0)
-  total      Float   @default(0)
+  cessRate   Float   @default(0)
+  cessPerUnitPaise Int @default(0)
+  cgstPaise  Int     @default(0)
+  sgstPaise  Int     @default(0)
+  igstPaise  Int     @default(0)
+  cessPaise  Int     @default(0)
+  totalPaise Int     @default(0)
+  supplyType String  @default("TAXABLE")
+  pricingMode String @default("EXCLUSIVE")
 
   invoiceId String
   invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item      Item?   @relation(fields: [itemId], references: [id])
+
+  @@index([invoiceId])
 }
 
 model Purchase {
@@ -223,16 +289,22 @@ model Purchase {
   dueDate       DateTime?
   notes         String?
   status        String   @default("UNPAID")
-  subTotal      Float    @default(0)
-  cgstTotal     Float    @default(0)
-  sgstTotal     Float    @default(0)
-  igstTotal     Float    @default(0)
-  taxTotal      Float    @default(0)
-  discount      Float    @default(0)
-  roundOff      Float    @default(0)
-  grandTotal    Float    @default(0)
-  amountPaid    Float    @default(0)
+  subTotalPaise   Int    @default(0)
+  cgstTotalPaise  Int    @default(0)
+  sgstTotalPaise  Int    @default(0)
+  igstTotalPaise  Int    @default(0)
+  cessTotalPaise  Int    @default(0)
+  taxTotalPaise   Int    @default(0)
+  discountPaise   Int    @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int    @default(0)
+  grandTotalPaise Int    @default(0)
+  amountPaidPaise Int    @default(0)
   isInterState  Boolean  @default(false)
+  reverseCharge Boolean  @default(false)
+  placeOfSupply String?
+  // Input tax credit eligibility on this purchase.
+  itcEligible   Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -246,6 +318,7 @@ model Purchase {
 
   @@unique([companyId, number])
   @@index([companyId, date])
+  @@index([companyId, status, dueDate])
 }
 
 model PurchaseItem {
@@ -255,18 +328,26 @@ model PurchaseItem {
   hsn        String?
   quantity   Float
   unit       String  @default("NOS")
-  rate       Float
-  discount   Float   @default(0)
-  taxableAmount Float @default(0)
+  ratePaise     Int
+  discountPaise Int  @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int  @default(0)
   gstRate    Float   @default(0)
-  cgst       Float   @default(0)
-  sgst       Float   @default(0)
-  igst       Float   @default(0)
-  total      Float   @default(0)
+  cessRate   Float   @default(0)
+  cessPerUnitPaise Int @default(0)
+  cgstPaise  Int     @default(0)
+  sgstPaise  Int     @default(0)
+  igstPaise  Int     @default(0)
+  cessPaise  Int     @default(0)
+  totalPaise Int     @default(0)
+  supplyType String  @default("TAXABLE")
+  pricingMode String @default("EXCLUSIVE")
 
   purchaseId String
   purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   item       Item?    @relation(fields: [itemId], references: [id])
+
+  @@index([purchaseId])
 }
 
 model Payment {
@@ -276,7 +357,7 @@ model Payment {
   type       String   // RECEIVED | PAID
   mode       String   @default("CASH") // CASH | BANK | UPI | CHEQUE | CARD
   reference  String?
-  amount     Float
+  amountPaise Int
   notes      String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -293,6 +374,7 @@ model Payment {
 
   @@unique([companyId, number])
   @@index([companyId, date])
+  @@index([companyId, partyId, date])
 }
 
 model StockMovement {
@@ -319,15 +401,19 @@ model Quotation {
   validUntil   DateTime?
   notes        String?
   status       String   @default("OPEN") // OPEN | ACCEPTED | CONVERTED | EXPIRED | REJECTED
-  subTotal     Float    @default(0)
-  cgstTotal    Float    @default(0)
-  sgstTotal    Float    @default(0)
-  igstTotal    Float    @default(0)
-  taxTotal     Float    @default(0)
-  discount     Float    @default(0)
-  roundOff     Float    @default(0)
-  grandTotal   Float    @default(0)
+  subTotalPaise   Int   @default(0)
+  cgstTotalPaise  Int   @default(0)
+  sgstTotalPaise  Int   @default(0)
+  igstTotalPaise  Int   @default(0)
+  cessTotalPaise  Int   @default(0)
+  taxTotalPaise   Int   @default(0)
+  discountPaise   Int   @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int   @default(0)
+  grandTotalPaise Int   @default(0)
   isInterState Boolean  @default(false)
+  reverseCharge Boolean @default(false)
+  placeOfSupply String?
   convertedInvoiceId String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -350,18 +436,26 @@ model QuotationItem {
   hsn           String?
   quantity      Float
   unit          String  @default("NOS")
-  rate          Float
-  discount      Float   @default(0)
-  taxableAmount Float   @default(0)
+  ratePaise     Int
+  discountPaise Int     @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int     @default(0)
   gstRate       Float   @default(0)
-  cgst          Float   @default(0)
-  sgst          Float   @default(0)
-  igst          Float   @default(0)
-  total         Float   @default(0)
+  cessRate      Float   @default(0)
+  cessPerUnitPaise Int  @default(0)
+  cgstPaise     Int     @default(0)
+  sgstPaise     Int     @default(0)
+  igstPaise     Int     @default(0)
+  cessPaise     Int     @default(0)
+  totalPaise    Int     @default(0)
+  supplyType    String  @default("TAXABLE")
+  pricingMode   String  @default("EXCLUSIVE")
 
   quotationId String
   quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   item        Item?     @relation(fields: [itemId], references: [id])
+
+  @@index([quotationId])
 }
 
 model CreditNote {
@@ -372,15 +466,19 @@ model CreditNote {
   reason       String?
   notes        String?
   originalRef  String?  // original invoice/purchase number
-  subTotal     Float    @default(0)
-  cgstTotal    Float    @default(0)
-  sgstTotal    Float    @default(0)
-  igstTotal    Float    @default(0)
-  taxTotal     Float    @default(0)
-  discount     Float    @default(0)
-  roundOff     Float    @default(0)
-  grandTotal   Float    @default(0)
+  subTotalPaise   Int   @default(0)
+  cgstTotalPaise  Int   @default(0)
+  sgstTotalPaise  Int   @default(0)
+  igstTotalPaise  Int   @default(0)
+  cessTotalPaise  Int   @default(0)
+  taxTotalPaise   Int   @default(0)
+  discountPaise   Int   @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int   @default(0)
+  grandTotalPaise Int   @default(0)
   isInterState Boolean  @default(false)
+  reverseCharge Boolean @default(false)
+  placeOfSupply String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -402,18 +500,26 @@ model CreditNoteItem {
   hsn           String?
   quantity      Float
   unit          String  @default("NOS")
-  rate          Float
-  discount      Float   @default(0)
-  taxableAmount Float   @default(0)
+  ratePaise     Int
+  discountPaise Int     @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int     @default(0)
   gstRate       Float   @default(0)
-  cgst          Float   @default(0)
-  sgst          Float   @default(0)
-  igst          Float   @default(0)
-  total         Float   @default(0)
+  cessRate      Float   @default(0)
+  cessPerUnitPaise Int  @default(0)
+  cgstPaise     Int     @default(0)
+  sgstPaise     Int     @default(0)
+  igstPaise     Int     @default(0)
+  cessPaise     Int     @default(0)
+  totalPaise    Int     @default(0)
+  supplyType    String  @default("TAXABLE")
+  pricingMode   String  @default("EXCLUSIVE")
 
   creditNoteId String
   creditNote   CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
   item         Item?      @relation(fields: [itemId], references: [id])
+
+  @@index([creditNoteId])
 }
 
 model Expense {
@@ -422,10 +528,12 @@ model Expense {
   date        DateTime @default(now())
   category    String   @default("General")
   paymentMode String   @default("CASH")
-  amount      Float    @default(0)
+  amountPaise Int      @default(0)
   gstRate     Float    @default(0)
-  taxAmount   Float    @default(0)
-  total       Float    @default(0)
+  taxPaise    Int      @default(0)
+  totalPaise  Int      @default(0)
+  // Whether input tax credit can be claimed on this expense.
+  itcEligible Boolean  @default(false)
   reference   String?
   notes       String?
   createdAt   DateTime @default(now())
@@ -504,9 +612,9 @@ model BankTransaction {
   date         DateTime
   description  String
   reference    String?
-  debit        Float    @default(0)
-  credit       Float    @default(0)
-  balance      Float    @default(0)
+  debitPaise   Int      @default(0)
+  creditPaise  Int      @default(0)
+  balancePaise Int      @default(0)
   isMatched    Boolean  @default(false)
   matchedPaymentId String?
   createdAt    DateTime @default(now())
@@ -523,7 +631,7 @@ model Budget {
   name      String
   category  String   // Sales | Purchases | Expenses | Rent | Salaries etc.
   period    String   // "2025-04" for monthly or "2025-Q1" etc.
-  amount    Float    @default(0)
+  amountPaise Int    @default(0)
   createdAt DateTime @default(now())
 
   companyId String
@@ -551,6 +659,169 @@ model AuditLog {
 }
 
 
+// ======================== DOCUMENT NUMBERING ========================
+//
+// Replaces the previous read-latest-and-increment approach, which raced under
+// concurrency because the read happened outside the enclosing transaction.
+// This row is updated inside the same transaction that creates the document,
+// so allocation is atomic.
+//
+// Keyed on financialYear because GST requires a series that restarts each year.
+model DocumentCounter {
+  id            String @id @default(cuid())
+  documentType  String // INVOICE | PURCHASE | PAYMENT | QUOTATION | CREDIT | DEBIT | EXPENSE | JOURNAL
+  financialYear String // "2025-26"
+  prefix        String
+  lastNumber    Int    @default(0)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, documentType, financialYear])
+}
+
+// ======================== FINANCIAL YEAR / PERIOD LOCK ========================
+//
+// Once a return is filed, the entries behind it must not change, or the books
+// stop matching the return.
+model FinancialYear {
+  id         String   @id @default(cuid())
+  label      String   // "2025-26"
+  startDate  DateTime // 1 April
+  endDate    DateTime // 31 March
+  isClosed   Boolean  @default(false)
+  // No entry may be created or edited on or before this date.
+  lockedTill DateTime?
+  createdAt  DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, label])
+  @@index([companyId, startDate])
+}
+
+
+// ======================== DOUBLE-ENTRY ACCOUNTING ========================
+//
+// Ledger groups nest, as in Tally. `nature` determines which financial
+// statement a balance lands in and which sign is "normal".
+model LedgerGroup {
+  id       String  @id @default(cuid())
+  name     String
+  nature   String  // ASSET | LIABILITY | INCOME | EXPENSE | EQUITY
+  parentId String?
+  // System groups are created by the seed and cannot be deleted, because
+  // posting rules reference them by name.
+  isSystem Boolean @default(false)
+  sortOrder Int    @default(0)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  parent   LedgerGroup?  @relation("GroupTree", fields: [parentId], references: [id])
+  children LedgerGroup[] @relation("GroupTree")
+  ledgers  Ledger[]
+
+  @@unique([companyId, name])
+  @@index([companyId, nature])
+}
+
+model Ledger {
+  id                  String  @id @default(cuid())
+  name                String
+  code                String?
+  openingBalancePaise Int     @default(0)
+  // Opening balances need a side: a debtor opens debit, a creditor opens credit.
+  openingIsDebit      Boolean @default(true)
+  isSystem            Boolean @default(false)
+
+  // A party gets exactly one control ledger, so its ledger balance and its
+  // outstanding always agree.
+  partyId String? @unique
+
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  groupId   String
+  group     LedgerGroup @relation(fields: [groupId], references: [id])
+  party     Party?      @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  lines JournalEntryLine[]
+
+  @@unique([companyId, name])
+  @@index([companyId, groupId])
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  voucherType String   // SALES | PURCHASE | RECEIPT | PAYMENT | JOURNAL | CONTRA | CREDIT_NOTE | DEBIT_NOTE | EXPENSE | OPENING
+  voucherNo   String
+  date        DateTime
+  narration   String?
+
+  // Link back to the document that produced this posting, so a report figure
+  // can drill through to its source.
+  sourceType String? // "Invoice" | "Purchase" | "Payment" | "Expense" | "CreditNote"
+  sourceId   String?
+
+  isLocked  Boolean  @default(false)
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  lines JournalEntryLine[]
+
+  @@unique([companyId, voucherType, voucherNo])
+  @@index([companyId, date])
+  @@index([companyId, sourceType, sourceId])
+}
+
+model JournalEntryLine {
+  id       String @id @default(cuid())
+  // Exactly one of these is non-zero. The sum of debits must equal the sum of
+  // credits for every entry - enforced in src/lib/accounting.ts inside the
+  // transaction that writes the entry. Integers make that check exact.
+  debitPaise  Int @default(0)
+  creditPaise Int @default(0)
+  narration   String?
+
+  entryId  String
+  entry    JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  ledgerId String
+  ledger   Ledger       @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@index([ledgerId])
+}
+
+
+// ======================== AI USAGE METERING ========================
+//
+// AI is the only cost that scales with usage, so it must be attributable per
+// tenant and enforceable against a budget BEFORE the call is made.
+model AiUsageLog {
+  id           String   @id @default(cuid())
+  feature      String   // OCR | ASSISTANT | CATEGORISE | FORECAST | SUMMARY
+  provider     String   // mock | openai | gemini | anthropic | local
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costPaise    Int      @default(0)
+  cacheHit     Boolean  @default(false)
+  userId       String?
+  createdAt    DateTime @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([companyId, feature])
+}
+
+
 // ======================== PLATFORM / SUPER-ADMIN ========================
 
 // Key-value store for global site settings (contact, social, announcement, etc.)
@@ -567,7 +838,10 @@ model Coupon {
   code           String    @unique
   description    String?
   type           String    @default("PERCENT") // PERCENT | FLAT
-  value          Float     @default(0)
+  // Used when type = PERCENT. A percentage, not money.
+  percentOff     Float     @default(0)
+  // Used when type = FLAT. Money, in paise.
+  flatOffPaise   Int       @default(0)
   appliesToPlan  String?   // BASIC | PREMIUM | null = any paid plan
   maxRedemptions Int?      // null = unlimited
   timesRedeemed  Int       @default(0)
@@ -581,8 +855,8 @@ model PlanSetting {
   id           String   @id // FREE | BASIC | PREMIUM
   name         String
   tagline      String?
-  priceMonthly Float    @default(0)
-  priceAnnual  Float    @default(0)
+  priceMonthlyPaise Int  @default(0)
+  priceAnnualPaise  Int  @default(0)
   invoiceLimit Int      @default(-1) // -1 = unlimited
   userLimit    Int      @default(1)
   active       Boolean  @default(true)

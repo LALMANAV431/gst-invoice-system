@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { Plus, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import PaymentDeleteButton from "./PaymentDeleteButton";
 import EmptyState from "@/components/EmptyState";
@@ -19,8 +19,8 @@ export default async function PaymentsPage() {
 
   const received = payments
     .filter((p) => p.type === "RECEIVED")
-    .reduce((s, p) => s + p.amount, 0);
-  const paid = payments.filter((p) => p.type === "PAID").reduce((s, p) => s + p.amount, 0);
+    .reduce((s, p) => s + p.amountPaise, 0);
+  const paid = payments.filter((p) => p.type === "PAID").reduce((s, p) => s + p.amountPaise, 0);
 
   return (
     <div className="space-y-4">
@@ -40,7 +40,7 @@ export default async function PaymentsPage() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-slate-500 uppercase font-semibold">Received</div>
-              <div className="text-2xl font-bold text-emerald-600 mt-2">{formatINR(received)}</div>
+              <div className="text-2xl font-bold text-emerald-600 mt-2">{formatPaise(received)}</div>
             </div>
             <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 text-white flex items-center justify-center shadow-lg">
               <ArrowDownLeft className="h-5 w-5" />
@@ -52,7 +52,7 @@ export default async function PaymentsPage() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-slate-500 uppercase font-semibold">Paid</div>
-              <div className="text-2xl font-bold text-rose-600 mt-2">{formatINR(paid)}</div>
+              <div className="text-2xl font-bold text-rose-600 mt-2">{formatPaise(paid)}</div>
             </div>
             <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white flex items-center justify-center shadow-lg">
               <ArrowUpRight className="h-5 w-5" />
@@ -105,7 +105,7 @@ export default async function PaymentsPage() {
                     <td className="text-xs">
                       {p.invoice?.number || p.purchase?.number || p.reference || "—"}
                     </td>
-                    <td className="text-right font-semibold">{formatINR(p.amount)}</td>
+                    <td className="text-right font-semibold">{formatPaise(p.amountPaise)}</td>
                     <td>
                       <PaymentDeleteButton id={p.id} />
                     </td>

@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 export default function PurchaseActions({ purchase }: { purchase: any }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState(purchase.grandTotal - purchase.amountPaid);
+  const [amount, setAmount] = useState(purchase.grandTotalPaise - purchase.amountPaidPaise);
   const [mode, setMode] = useState("CASH");
 
   async function onDelete() {

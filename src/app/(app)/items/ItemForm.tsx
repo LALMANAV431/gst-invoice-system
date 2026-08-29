@@ -9,8 +9,8 @@ type ItemInput = {
   sku?: string | null;
   hsn?: string | null;
   unit?: string;
-  salePrice?: number;
-  purchasePrice?: number;
+  salePricePaise?: number;
+  purchasePricePaise?: number;
   gstRate?: number;
   openingStock?: number;
   lowStockAlert?: number;
@@ -25,8 +25,8 @@ export default function ItemForm({ initial }: { initial?: ItemInput }) {
     initial ?? {
       name: "",
       unit: "NOS",
-      salePrice: 0,
-      purchasePrice: 0,
+      salePricePaise: 0,
+      purchasePricePaise: 0,
       gstRate: 18,
       openingStock: 0,
       lowStockAlert: 0,
@@ -121,8 +121,8 @@ export default function ItemForm({ initial }: { initial?: ItemInput }) {
             type="number"
             step="0.01"
             className="input"
-            value={form.salePrice ?? 0}
-            onChange={(e) => set("salePrice", parseFloat(e.target.value) || 0)}
+            value={form.salePricePaise ?? 0}
+            onChange={(e) => set("salePricePaise", parseFloat(e.target.value) || 0)}
           />
         </div>
         <div>
@@ -131,8 +131,8 @@ export default function ItemForm({ initial }: { initial?: ItemInput }) {
             type="number"
             step="0.01"
             className="input"
-            value={form.purchasePrice ?? 0}
-            onChange={(e) => set("purchasePrice", parseFloat(e.target.value) || 0)}
+            value={form.purchasePricePaise ?? 0}
+            onChange={(e) => set("purchasePricePaise", parseFloat(e.target.value) || 0)}
           />
         </div>
         <div>

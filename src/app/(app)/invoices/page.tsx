@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { Plus, Eye } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 
@@ -68,9 +68,9 @@ export default async function InvoicesPage() {
                     </td>
                     <td>{formatDate(inv.date)}</td>
                     <td>{inv.party.name}</td>
-                    <td className="text-right">{formatINR(inv.subTotal)}</td>
-                    <td className="text-right">{formatINR(inv.taxTotal)}</td>
-                    <td className="text-right font-semibold">{formatINR(inv.grandTotal)}</td>
+                    <td className="text-right">{formatPaise(inv.subTotalPaise)}</td>
+                    <td className="text-right">{formatPaise(inv.taxTotalPaise)}</td>
+                    <td className="text-right font-semibold">{formatPaise(inv.grandTotalPaise)}</td>
                     <td>
                       {inv.status === "PAID" ? (
                         <span className="badge-green">Paid</span>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -33,12 +33,12 @@ export default async function OutstandingPage() {
   ]);
 
   const receivables = invoices.map((i) => {
-    const due = i.grandTotal - i.amountPaid;
+    const due = i.grandTotalPaise - i.amountPaidPaise;
     const days = Math.floor((now - new Date(i.date).getTime()) / 86400000);
     return { id: i.id, number: i.number, party: i.party.name, date: i.date, due, days, href: `/invoices/${i.id}` };
   });
   const payables = purchases.map((p) => {
-    const due = p.grandTotal - p.amountPaid;
+    const due = p.grandTotalPaise - p.amountPaidPaise;
     const days = Math.floor((now - new Date(p.date).getTime()) / 86400000);
     return { id: p.id, number: p.number, party: p.party.name, date: p.date, due, days, href: `/purchases/${p.id}` };
   });
@@ -65,11 +65,11 @@ export default async function OutstandingPage() {
       <div className="grid sm:grid-cols-2 gap-4">
         <div className="card card-padding card-hover">
           <div className="text-xs text-slate-500 uppercase font-semibold">Total Receivable</div>
-          <div className="text-2xl font-bold text-emerald-600 mt-2">{formatINR(totalRecv)}</div>
+          <div className="text-2xl font-bold text-emerald-600 mt-2">{formatPaise(totalRecv)}</div>
         </div>
         <div className="card card-padding card-hover">
           <div className="text-xs text-slate-500 uppercase font-semibold">Total Payable</div>
-          <div className="text-2xl font-bold text-rose-600 mt-2">{formatINR(totalPay)}</div>
+          <div className="text-2xl font-bold text-rose-600 mt-2">{formatPaise(totalPay)}</div>
         </div>
       </div>
 
@@ -79,7 +79,7 @@ export default async function OutstandingPage() {
           {recvByBucket.map((b) => (
             <div key={b.bucket} className="rounded-xl border border-slate-100 p-3">
               <div className="text-xs text-slate-500">{b.bucket} days</div>
-              <div className="font-bold mt-1">{formatINR(b.amount)}</div>
+              <div className="font-bold mt-1">{formatPaise(b.amount)}</div>
             </div>
           ))}
         </div>
@@ -120,7 +120,7 @@ export default async function OutstandingPage() {
                           {r.days}
                         </span>
                       </td>
-                      <td className="text-right font-semibold">{formatINR(r.due)}</td>
+                      <td className="text-right font-semibold">{formatPaise(r.due)}</td>
                     </tr>
                   ))
                 )}
@@ -163,7 +163,7 @@ export default async function OutstandingPage() {
                           {r.days}
                         </span>
                       </td>
-                      <td className="text-right font-semibold">{formatINR(r.due)}</td>
+                      <td className="text-right font-semibold">{formatPaise(r.due)}</td>
                     </tr>
                   ))
                 )}

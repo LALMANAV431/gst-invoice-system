@@ -8,7 +8,7 @@ type PlanRow = {
   name: string;
   tagline?: string | null;
   price: number;
-  priceAnnual: number;
+  priceAnnualPaise: number;
   invoiceLimit: number; // Infinity becomes a big number over JSON
   userLimit: number;
 };
@@ -51,8 +51,8 @@ export default function AdminPricingPage() {
         id,
         name: p.name,
         tagline: p.tagline,
-        priceMonthly: p.price,
-        priceAnnual: p.priceAnnual,
+        priceMonthlyPaise: p.price,
+        priceAnnualPaise: p.priceAnnualPaise,
         invoiceLimit: p.invoiceLimit,
         userLimit: p.userLimit,
       }),
@@ -93,7 +93,7 @@ export default function AdminPricingPage() {
                 </div>
                 <div>
                   <label className="text-xs text-slate-400">Annual ₹</label>
-                  <input type="number" className={inputCls} value={p.priceAnnual} onChange={(e) => set(id, "priceAnnual", parseFloat(e.target.value) || 0)} />
+                  <input type="number" className={inputCls} value={p.priceAnnualPaise} onChange={(e) => set(id, "priceAnnualPaise", parseFloat(e.target.value) || 0)} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, X } from "lucide-react";
-import { inputDate, formatINR } from "@/lib/utils";
+import { inputDate, formatPaise } from "@/lib/utils";
 
 const CATEGORIES = [
   "Rent",
@@ -182,9 +182,9 @@ export default function ExpenseForm({ vendors }: { vendors: { id: string; name: 
 
                 <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
                   <span className="text-sm text-slate-500">
-                    Tax {formatINR(tax)} · Total
+                    Tax {formatPaise(tax)} · Total
                   </span>
-                  <span className="text-lg font-bold">{formatINR(total)}</span>
+                  <span className="text-lg font-bold">{formatPaise(total)}</span>
                 </div>
 
                 <div className="flex gap-2 mt-4">

@@ -39,7 +39,7 @@ export async function POST(req: Request) {
       state: body.state || null,
       stateCode: body.stateCode || (body.gstin ? body.gstin.slice(0, 2) : null),
       pincode: body.pincode || null,
-      openingBalance: parseFloat(body.openingBalance) || 0,
+      openingBalancePaise: parseFloat(body.openingBalancePaise) || 0,
       balanceType: body.balanceType || (body.type === "VENDOR" ? "PAYABLE" : "RECEIVABLE"),
     },
   });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
 import { hasFeature, planActive } from "@/lib/plan";
+import { toPaise } from "@/lib/money";
 
 export async function GET() {
   const ctx = await getCurrentUserAndCompany();
@@ -34,13 +35,13 @@ export async function POST(req: Request) {
         period,
       },
     },
-    update: { amount: parseFloat(amount), name: name || category },
+    update: { amountPaise: toPaise(amount), name: name || category },
     create: {
       companyId: ctx.company.id,
       name: name || category,
       category,
       period,
-      amount: parseFloat(amount),
+      amountPaise: toPaise(amount),
     },
   });
   return NextResponse.json(budget);

@@ -28,7 +28,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
   if (!invoice) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (invoice.ewayBillNo)
     return NextResponse.json({ error: "E-Way Bill already generated" }, { status: 400 });
-  if (invoice.grandTotal < EWAY_THRESHOLD)
+  if (invoice.grandTotalPaise < EWAY_THRESHOLD)
     return NextResponse.json(
       { error: `E-Way Bill is only required for invoices above ₹${EWAY_THRESHOLD.toLocaleString("en-IN")}.` },
       { status: 400 }

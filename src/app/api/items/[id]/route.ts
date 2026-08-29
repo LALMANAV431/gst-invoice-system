@@ -26,9 +26,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       sku: body.sku ?? existing.sku,
       hsn: body.hsn ?? existing.hsn,
       unit: body.unit ?? existing.unit,
-      salePrice: body.salePrice != null ? parseFloat(body.salePrice) : existing.salePrice,
-      purchasePrice:
-        body.purchasePrice != null ? parseFloat(body.purchasePrice) : existing.purchasePrice,
+      salePricePaise: body.salePricePaise != null ? parseFloat(body.salePricePaise) : existing.salePricePaise,
+      purchasePricePaise:
+        body.purchasePricePaise != null ? parseFloat(body.purchasePricePaise) : existing.purchasePricePaise,
       gstRate: body.gstRate != null ? parseFloat(body.gstRate) : existing.gstRate,
       openingStock:
         body.openingStock != null ? parseFloat(body.openingStock) : existing.openingStock,

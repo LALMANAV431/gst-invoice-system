@@ -19,7 +19,7 @@ export default async function BillingPage() {
         name: p.name,
         tagline: p.tagline,
         price: p.price,
-        priceAnnual: (p as any).priceAnnual ?? 0,
+        priceAnnualPaise: (p as any).priceAnnualPaise ?? 0,
         invoiceLimit: p.invoiceLimit === Infinity ? null : p.invoiceLimit,
         userLimit: p.userLimit,
         features: p.features,

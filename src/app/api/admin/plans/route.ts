@@ -21,8 +21,8 @@ export async function PUT(req: Request) {
   const data = {
     name: body.name || id,
     tagline: body.tagline || null,
-    priceMonthly: parseFloat(body.priceMonthly) || 0,
-    priceAnnual: parseFloat(body.priceAnnual) || 0,
+    priceMonthlyPaise: parseFloat(body.priceMonthlyPaise) || 0,
+    priceAnnualPaise: parseFloat(body.priceAnnualPaise) || 0,
     invoiceLimit: body.invoiceLimit === "" || body.invoiceLimit == null ? -1 : parseInt(body.invoiceLimit),
     userLimit: parseInt(body.userLimit) || 1,
     active: body.active !== false,

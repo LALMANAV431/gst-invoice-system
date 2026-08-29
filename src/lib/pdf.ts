@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { formatINR, formatDate, numberToWords } from "./utils";
+import { formatDate, numberToWords } from "./utils";
+import { formatPaise, toRupees } from "./money";
 
 export function generateInvoicePDF(invoice: any, company: any) {
   const doc = new jsPDF();
@@ -96,11 +97,11 @@ export function generateInvoicePDF(invoice: any, company: any) {
       it.itemName,
       it.hsn || "-",
       `${it.quantity} ${it.unit}`,
-      formatINR(it.rate),
-      formatINR(it.taxableAmount),
+      formatPaise(it.ratePaise),
+      formatPaise(it.taxablePaise),
       `${it.gstRate}%`,
-      formatINR(it.cgst + it.sgst + it.igst),
-      formatINR(it.total),
+      formatPaise(it.cgstPaise + it.sgstPaise + it.igstPaise),
+      formatPaise(it.totalPaise),
     ]),
     styles: { fontSize: 9 },
     headStyles: { fillColor: [31, 61, 245] },
@@ -122,42 +123,44 @@ export function generateInvoicePDF(invoice: any, company: any) {
   const valX = pageWidth - 14;
   doc.setFontSize(10);
   doc.text("Subtotal", totalsX, endY);
-  doc.text(formatINR(invoice.subTotal), valX, endY, { align: "right" });
+  doc.text(formatPaise(invoice.subTotalPaise), valX, endY, { align: "right" });
   endY += 5;
 
   if (invoice.isInterState) {
     doc.text("IGST", totalsX, endY);
-    doc.text(formatINR(invoice.igstTotal), valX, endY, { align: "right" });
+    doc.text(formatPaise(invoice.igstTotalPaise), valX, endY, { align: "right" });
     endY += 5;
   } else {
     doc.text("CGST", totalsX, endY);
-    doc.text(formatINR(invoice.cgstTotal), valX, endY, { align: "right" });
+    doc.text(formatPaise(invoice.cgstTotalPaise), valX, endY, { align: "right" });
     endY += 5;
     doc.text("SGST", totalsX, endY);
-    doc.text(formatINR(invoice.sgstTotal), valX, endY, { align: "right" });
+    doc.text(formatPaise(invoice.sgstTotalPaise), valX, endY, { align: "right" });
     endY += 5;
   }
-  if (invoice.discount > 0) {
+  if (invoice.discountPaise > 0) {
     doc.text("Discount", totalsX, endY);
-    doc.text(`- ${formatINR(invoice.discount)}`, valX, endY, { align: "right" });
+    doc.text(`- ${formatPaise(invoice.discountPaise)}`, valX, endY, { align: "right" });
     endY += 5;
   }
-  if (invoice.roundOff) {
+  if (invoice.roundOffPaise) {
     doc.text("Round off", totalsX, endY);
-    doc.text(formatINR(invoice.roundOff), valX, endY, { align: "right" });
+    doc.text(formatPaise(invoice.roundOffPaise), valX, endY, { align: "right" });
     endY += 5;
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.text("Grand Total", totalsX, endY + 2);
-  doc.text(formatINR(invoice.grandTotal), valX, endY + 2, { align: "right" });
+  doc.text(formatPaise(invoice.grandTotalPaise), valX, endY + 2, { align: "right" });
   doc.setFont("helvetica", "normal");
 
   // Words
   doc.setFontSize(9);
   endY += 12;
-  const words = numberToWords(invoice.grandTotal);
+  // numberToWords expects RUPEES. Passing paise here printed a total 100x too
+  // large in words while the figures above were correct - on a legal document.
+  const words = numberToWords(toRupees(invoice.grandTotalPaise));
   doc.text(`In words: ${words}`, 14, endY, { maxWidth: pageWidth - 28 });
   endY += 8;
 

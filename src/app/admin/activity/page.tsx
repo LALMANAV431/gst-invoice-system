@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/money";
 import { Activity, FileText, Building2, IndianRupee, LifeBuoy } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export default async function AdminActivityPage() {
   const events: Event[] = [
     ...invoices.map((i) => ({
       type: "invoice",
-      label: `Invoice ${i.number} · ${formatINR(i.grandTotal)}`,
+      label: `Invoice ${i.number} · ${formatPaise(i.grandTotalPaise)}`,
       sub: i.company.name,
       at: i.createdAt,
       icon: FileText,
@@ -41,7 +41,7 @@ export default async function AdminActivityPage() {
     })),
     ...payments.map((p) => ({
       type: "payment",
-      label: `${p.type === "RECEIVED" ? "Receipt" : "Payment"} ${formatINR(p.amount)}`,
+      label: `${p.type === "RECEIVED" ? "Receipt" : "Payment"} ${formatPaise(p.amountPaise)}`,
       sub: p.company.name,
       at: p.createdAt,
       icon: IndianRupee,

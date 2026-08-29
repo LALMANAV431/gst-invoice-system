@@ -5,14 +5,14 @@ import toast from "react-hot-toast";
 import { motion } from "framer-motion";
 import { Check, Sparkles, Loader2, Crown, Ticket } from "lucide-react";
 import { FEATURE_LABELS, type PlanId, type Feature } from "@/lib/plan";
-import { formatINR } from "@/lib/utils";
+import { formatPaise } from "@/lib/utils";
 
 type SerialPlan = {
   id: PlanId;
   name: string;
   tagline?: string | null;
   price: number;
-  priceAnnual: number;
+  priceAnnualPaise: number;
   invoiceLimit: number | null; // null = unlimited
   userLimit: number;
   features: Feature[];
@@ -61,8 +61,8 @@ export default function PricingClient({
     });
     const j = await res.json();
     if (res.ok) {
-      setApplied({ code: j.code, discount: j.discount, finalPrice: j.finalPrice, plan: planId });
-      toast.success(`Coupon applied: ${formatINR(j.discount)} off → ${formatINR(j.finalPrice)}`);
+      setApplied({ code: j.code, discount: j.discountPaise, finalPrice: j.finalPrice, plan: planId });
+      toast.success(`Coupon applied: ${formatPaise(j.discountPaise)} off → ${formatPaise(j.finalPrice)}`);
     } else {
       setApplied(null);
       toast.error(j.error || "Invalid coupon");
@@ -97,7 +97,7 @@ export default function PricingClient({
   }
 
   function priceFor(p: SerialPlan) {
-    return billing === "annual" ? p.priceAnnual : p.price;
+    return billing === "annual" ? p.priceAnnualPaise : p.price;
   }
 
   return (
@@ -177,11 +177,11 @@ export default function PricingClient({
               <div className="mt-4">
                 {showDiscount ? (
                   <>
-                    <span className="text-3xl font-bold">{formatINR(applied!.finalPrice)}</span>
-                    <span className="text-sm text-slate-400 line-through ml-2">{formatINR(price)}</span>
+                    <span className="text-3xl font-bold">{formatPaise(applied!.finalPrice)}</span>
+                    <span className="text-sm text-slate-400 line-through ml-2">{formatPaise(price)}</span>
                   </>
                 ) : (
-                  <span className="text-3xl font-bold">{price === 0 ? "Free" : formatINR(price)}</span>
+                  <span className="text-3xl font-bold">{price === 0 ? "Free" : formatPaise(price)}</span>
                 )}
                 {price > 0 && <span className="text-sm text-slate-500">/{billing === "annual" ? "year" : "month"}</span>}
               </div>

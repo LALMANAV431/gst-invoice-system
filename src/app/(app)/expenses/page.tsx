@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { getCurrentUserAndCompany } from "@/lib/auth";
-import { formatINR, formatDate } from "@/lib/utils";
+import { formatPaise, formatDate } from "@/lib/utils";
 import { Wallet } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import ExpenseForm from "./ExpenseForm";
@@ -29,9 +29,9 @@ export default async function ExpensesPage() {
     }),
     db.expense.aggregate({
       where: { companyId: ctx.company.id, date: { gte: startOfMonth } },
-      _sum: { total: true },
+      _sum: { totalPaise: true },
     }),
-    db.expense.aggregate({ where: { companyId: ctx.company.id }, _sum: { total: true } }),
+    db.expense.aggregate({ where: { companyId: ctx.company.id }, _sum: { totalPaise: true } }),
   ]);
 
   return (
@@ -51,7 +51,7 @@ export default async function ExpensesPage() {
             <div>
               <div className="text-xs text-slate-500 uppercase font-semibold">This Month</div>
               <div className="text-2xl font-bold text-rose-600 mt-2">
-                {formatINR(monthAgg._sum.total ?? 0)}
+                {formatPaise(monthAgg._sum.totalPaise ?? 0)}
               </div>
             </div>
             <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white flex items-center justify-center shadow-lg">
@@ -61,7 +61,7 @@ export default async function ExpensesPage() {
         </div>
         <div className="card card-padding card-hover">
           <div className="text-xs text-slate-500 uppercase font-semibold">Total Expenses</div>
-          <div className="text-2xl font-bold mt-2">{formatINR(totalAgg._sum.total ?? 0)}</div>
+          <div className="text-2xl font-bold mt-2">{formatPaise(totalAgg._sum.totalPaise ?? 0)}</div>
         </div>
       </div>
 
@@ -101,9 +101,9 @@ export default async function ExpensesPage() {
                     </td>
                     <td>{e.party?.name || "—"}</td>
                     <td>{e.paymentMode}</td>
-                    <td className="text-right">{formatINR(e.amount)}</td>
-                    <td className="text-right">{formatINR(e.taxAmount)}</td>
-                    <td className="text-right font-semibold">{formatINR(e.total)}</td>
+                    <td className="text-right">{formatPaise(e.amountPaise)}</td>
+                    <td className="text-right">{formatPaise(e.taxPaise)}</td>
+                    <td className="text-right font-semibold">{formatPaise(e.totalPaise)}</td>
                     <td>
                       <ExpenseDeleteButton id={e.id} />
                     </td>

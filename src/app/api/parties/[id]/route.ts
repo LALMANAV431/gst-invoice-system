@@ -34,8 +34,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       state: body.state ?? existing.state,
       stateCode: body.stateCode ?? existing.stateCode,
       pincode: body.pincode ?? existing.pincode,
-      openingBalance:
-        body.openingBalance != null ? parseFloat(body.openingBalance) : existing.openingBalance,
+      openingBalancePaise:
+        body.openingBalancePaise != null ? parseFloat(body.openingBalancePaise) : existing.openingBalancePaise,
       balanceType: body.balanceType ?? existing.balanceType,
     },
   });

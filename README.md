@@ -12,37 +12,43 @@ multi-tenant SaaS web application.
 
 ## Status
 
-This is a **working application with a solid feature surface**, not yet a production-ready
-accounting system. Be aware of the following before deploying it for real bookkeeping:
-
 | Area | Status |
 |---|---|
 | Auth, multi-tenant scoping, RBAC | Working |
 | Invoices, purchases, quotations, credit notes, POS, expenses | Working |
 | Inventory, stock movements, godowns, stock transfers | Working |
-| GSTR-1 export, day book, ledger, outstanding reports | Working |
+| **Money stored as integer paise** | **Working — migrated from `Float`** |
+| **GST: discount before tax, cess, exempt/nil/zero-rated, RCM, inclusive pricing** | **Working** |
+| **Double-entry ledger, trial balance, P&L, balance sheet, GST summary** | **Working** |
+| **Atomic gap-free document numbering** | **Working** |
+| **Rate limiting, CSRF origin checks, security headers, session revocation** | **Working** |
+| GSTR-1 export, day book, party ledger, outstanding | Working |
 | PDF invoices, UPI QR, CSV import, PWA, dark mode | Working |
 | Super-admin panel, plans, coupons, tickets, audit log | Working |
-| **Money stored as floating point** | **Known defect — see below** |
-| **Double-entry ledger, trial balance, P&L, balance sheet** | **Not implemented** |
-| **Automated tests across the app** | **Only the money/GST engine is covered** |
+| Payment gateway, AI features, e-invoice IRP integration | Not built — see roadmap |
+| Hindi UI translation | Not built — English only today |
 
-### Read this before trusting the numbers
+### Correctness
 
-Monetary values are currently stored as SQLite `Float` columns (93 of them) and GST is
-computed with floating-point arithmetic. This produces measurable errors — verified, not
-theoretical:
+Money is stored as **integer paise** throughout and GST is computed by a single tested
+engine. The defects the original code carried are fixed and covered by regression tests:
 
-- Accumulating 100 lines of `3 x ₹33.33` yields `9998.999999999984` instead of `9999`.
-- A ₹1,000 invoice-level discount on a ₹10,000 line at 18% **overcharges GST by ₹180**,
-  because the discount is subtracted *after* tax instead of before it.
-- Compensation cess is not supported at all, so 28%+cess items undercharge tax silently.
+| Was | Now |
+|---|---|
+| 93 `Float` money columns; `3 × ₹33.33 × 100` summed to `9998.999999999984` | Integer paise; sums exactly to `9999` |
+| ₹1,000 discount on ₹10,000 @18% charged ₹1,800 GST (**₹180 overcharge**) | Discount apportioned pro-rata **before** tax → ₹1,620 |
+| No compensation cess | Cess by rate and per unit (tobacco, vehicles, aerated drinks) |
+| Exempt / nil-rated / non-GST / zero-rated indistinguishable | Explicit supply types, preserved per line |
+| TDS subtracted from invoice total | Invoice face value intact; TDS reported separately |
+| Invoice numbers allocated outside the transaction (raced) | Atomic counter inside the transaction, FY-scoped |
+| No ledger; reports summed document tables | Double-entry ledger; every document posts a balanced entry |
 
-A correct, fully tested replacement engine now ships in
-[`src/lib/money.ts`](src/lib/money.ts) and [`src/lib/gst.ts`](src/lib/gst.ts) (integer
-paise, 56 passing tests). **It is not yet wired into the invoice routes** — that migration
-is the first item in [`docs/ROADMAP.md`](docs/ROADMAP.md). Until it lands, treat this app
-as a demo and pilot system rather than your books of record.
+**98 tests** cover the money, GST and accounting engines. The seed refuses to finish if the
+books it creates do not balance, and `/reports/trial-balance` shows the live position.
+
+Still not production-ready — see [`SECURITY.md`](SECURITY.md) and
+[`docs/ROADMAP.md`](docs/ROADMAP.md). The main gaps are a Next.js 16 upgrade (5 open `high`
+advisories), PostgreSQL migration, and no test coverage above the domain layer.
 
 ---
 
@@ -90,10 +96,19 @@ Open <http://localhost:3000>.
 | Email | `demo@gst.com` |
 | Password | `demo1234` |
 
-This account is seeded with a demo company, customers, suppliers, products, invoices and
-purchases. It is **also flagged as platform super-admin**, giving it access to `/admin`.
-That is convenient for exploring the app but is a security problem for any real
-deployment — see [`SECURITY.md`](SECURITY.md).
+This account is a **tenant admin only**. It comes with a demo company, customers,
+suppliers, products, invoices, a purchase and opening capital — enough that the ledger,
+trial balance, P&L and balance sheet all have real data.
+
+It is deliberately **not** a platform super-admin. The seed used to grant `isSuperAdmin`
+to these published credentials, which handed full platform control — including tenant
+impersonation — to anyone who seeded a public deployment. Create a super-admin explicitly:
+
+```bash
+npm run db:seed:admin -- --email you@example.com --password '<strong-password>'
+```
+
+The script enforces a minimum password strength and refuses obvious words.
 
 ---
 
@@ -128,7 +143,8 @@ provider first — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 | `npm test` | Run the Vitest suite once |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run db:push` | Sync the schema to the database |
-| `npm run db:seed` | Load demo data |
+| `npm run db:seed` | Load demo data (tenant admin only) |
+| `npm run db:seed:admin` | Create/promote a platform super-admin |
 | `npm run db:setup` | `db:push` + `db:seed` |
 | `npm run package:portable` | Build the portable USB edition |
 
