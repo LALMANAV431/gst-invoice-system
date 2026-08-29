@@ -4,11 +4,59 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { setSessionCookie } from "@/lib/auth";
 import { clientIp, LOGIN_LIMIT, rateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { findRecoveryCodeMatch, verifyTotp } from "@/lib/totp";
 
 const schema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  // TOTP code or a recovery code. Absent on the first step of a 2FA login.
+  code: z.string().max(20).optional(),
 });
+
+/**
+ * Check a TOTP code, falling back to a single-use recovery code.
+ *
+ * A used TOTP counter is recorded so the same code cannot be replayed inside its
+ * 30-second window, and a used recovery code is removed rather than merely
+ * marked — a "used" flag someone forgets to check is a code that still works.
+ */
+async function verifySecondFactor(
+  user: { id: string; totpSecret: string | null; totpLastCounter: number | null; recoveryCodeHashes: string | null },
+  code: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!user.totpSecret) return { ok: false, error: "Two-factor is not set up correctly." };
+
+  const totp = verifyTotp(user.totpSecret, code, { lastUsedCounter: user.totpLastCounter });
+
+  if (totp.valid) {
+    await db.user.update({
+      where: { id: user.id },
+      data: { totpLastCounter: totp.counter },
+    });
+    return { ok: true };
+  }
+
+  if (totp.reason === "REPLAY") {
+    return { ok: false, error: "That code has already been used. Wait for the next one." };
+  }
+
+  // Not a valid TOTP — try the recovery codes.
+  const hashes = user.recoveryCodeHashes?.split(",").filter(Boolean) ?? [];
+  if (hashes.length > 0) {
+    const match = findRecoveryCodeMatch(code, hashes);
+    if (match.matched) {
+      const remaining = hashes.filter((h) => h !== match.hash);
+      await db.user.update({
+        where: { id: user.id },
+        // Consumed by removal, so it can never be accepted a second time.
+        data: { recoveryCodeHashes: remaining.join(",") },
+      });
+      return { ok: true };
+    }
+  }
+
+  return { ok: false, error: "That code is not correct." };
+}
 
 export async function POST(req: Request) {
   try {
@@ -52,6 +100,24 @@ export async function POST(req: Request) {
     // Clear the per-account counter so a legitimate user who mistyped once is
     // not left throttled.
     resetRateLimit(`login:${ip}:${email}`);
+
+    // --- Second factor ------------------------------------------------------
+    // The password is correct but no session is issued yet. The code is checked
+    // in the same request when supplied, so there is no half-authenticated
+    // intermediate session to steal.
+    if (user.totpEnabledAt && user.totpSecret) {
+      if (!parsed.data.code) {
+        return NextResponse.json(
+          { twoFactorRequired: true, message: "Enter the code from your authenticator app." },
+          { status: 200 }
+        );
+      }
+
+      const outcome = await verifySecondFactor(user, parsed.data.code);
+      if (!outcome.ok) {
+        return NextResponse.json({ error: outcome.error, twoFactorRequired: true }, { status: 401 });
+      }
+    }
 
     await setSessionCookie({
       userId: user.id,

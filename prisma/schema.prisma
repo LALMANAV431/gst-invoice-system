@@ -45,6 +45,17 @@ model User {
   // Bumped to invalidate every existing JWT for this user (logout-everywhere,
   // password change, suspension). Checked on each request.
   tokenVersion Int      @default(0)
+
+  // --- Two-factor authentication ---
+  // Base32 TOTP secret. Stored only once 2FA is confirmed working, so a failed
+  // enrolment cannot lock the user out.
+  totpSecret        String?
+  totpEnabledAt     DateTime?
+  // Last accepted TOTP counter, so a code cannot be replayed inside its window.
+  totpLastCounter   Int?
+  // SHA-256 hashes of single-use recovery codes, comma-separated. Without these a
+  // lost phone locks the owner out of their own books permanently.
+  recoveryCodeHashes String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
