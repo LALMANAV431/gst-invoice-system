@@ -37,7 +37,11 @@ export type DocumentType =
   | "CREDIT"
   | "DEBIT"
   | "EXPENSE"
-  | "JOURNAL";
+  | "JOURNAL"
+  | "SALES_ORDER"
+  | "DELIVERY_CHALLAN"
+  | "PURCHASE_ORDER"
+  | "GRN";
 
 /** A Prisma client or an interactive transaction client. */
 type Client = Prisma.TransactionClient | typeof db;

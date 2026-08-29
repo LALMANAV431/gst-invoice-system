@@ -25,6 +25,7 @@ export const hi: Dictionary = {
   "nav.parties": "पार्टी",
   "nav.items": "आइटम",
   "nav.quotations": "कोटेशन",
+  "nav.orders": "ऑर्डर और चालान",
   "nav.invoices": "सेल्स इनवॉइस",
   "nav.purchases": "खरीद",
   "nav.creditNotes": "क्रेडिट/डेबिट नोट",

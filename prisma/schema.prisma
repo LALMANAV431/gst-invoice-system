@@ -130,6 +130,7 @@ model Company {
   counters       DocumentCounter[]
   financialYears FinancialYear[]
   aiUsageLogs    AiUsageLog[]
+  orderDocuments OrderDocument[]
 }
 
 model Party {
@@ -161,6 +162,7 @@ model Party {
   creditNotes CreditNote[]
   expenses    Expense[]
   ledger      Ledger?
+  orderDocuments OrderDocument[]
 
   @@index([companyId])
   @@index([companyId, gstin])
@@ -199,6 +201,7 @@ model Item {
   stockMovements StockMovement[]
   quotationItems  QuotationItem[]
   creditNoteItems CreditNoteItem[]
+  orderDocumentItems OrderDocumentItem[]
 
   @@index([companyId])
   @@index([companyId, barcode])
@@ -461,6 +464,126 @@ model QuotationItem {
   @@index([quotationId])
 }
 
+// ======================== ORDERS & GOODS MOVEMENT ========================
+//
+// Sales order, delivery challan, purchase order and goods receipt note share an
+// identical structure: a party, priced lines, totals, a status, and links to the
+// document they came from or became. Modelling them as four pairs of models
+// would be ~8 near-duplicate models and four copies of every query.
+//
+// A single model with a `docType` discriminator keeps one code path, so a fix to
+// (say) apportioned discounts applies to all four at once.
+//
+// LEDGER TREATMENT
+// ----------------
+// None of these post to the ledger:
+//   - Sales order and purchase order are COMMITMENTS. No goods have moved and no
+//     money is owed, so there is nothing to post.
+//   - Delivery challan and GRN move STOCK only. This is consistent with the
+//     periodic-inventory approach the posting rules already use: purchases are
+//     debited to the Purchases expense ledger, not to Stock-in-Hand, so stock
+//     quantities are tracked outside the ledger and closing stock is a year-end
+//     entry. A GRN therefore creates no liability until its purchase invoice is
+//     booked - which is correct, and is why "goods received not invoiced" is a
+//     reconciliation item rather than a missing posting.
+//
+// The ledger entry happens when the document is converted to an invoice or a
+// purchase.
+model OrderDocument {
+  id      String @id @default(cuid())
+  // SALES_ORDER | DELIVERY_CHALLAN | PURCHASE_ORDER | GRN
+  docType String
+  number  String
+  date    DateTime @default(now())
+  // SO/PO: when delivery is expected. DC/GRN: unused.
+  expectedDate DateTime?
+  // OPEN | PARTIAL | COMPLETED | CANCELLED
+  status  String @default("OPEN")
+  notes   String?
+  // Buyer's PO number on a sales order; supplier's DC number on a GRN.
+  externalRef String?
+
+  // Goods-movement fields. GST requires these on a delivery challan when goods
+  // move without an invoice (job work, approval basis, branch transfer).
+  transporterName String?
+  vehicleNumber   String?
+  // Reason goods are moving without an invoice, e.g. JOB_WORK | APPROVAL |
+  // BRANCH_TRANSFER | REPLACEMENT | OTHER
+  movementReason  String?
+
+  subTotalPaise   Int @default(0)
+  cgstTotalPaise  Int @default(0)
+  sgstTotalPaise  Int @default(0)
+  igstTotalPaise  Int @default(0)
+  cessTotalPaise  Int @default(0)
+  taxTotalPaise   Int @default(0)
+  discountPaise   Int @default(0)
+  additionalChargesPaise Int @default(0)
+  roundOffPaise   Int @default(0)
+  grandTotalPaise Int @default(0)
+  isInterState Boolean @default(false)
+  reverseCharge Boolean @default(false)
+  placeOfSupply String?
+
+  // The document this was raised from (DC from a sales order, GRN from a PO).
+  sourceDocumentId String?
+  // What it became: an Invoice id for SO/DC, a Purchase id for PO/GRN.
+  convertedToId    String?
+  convertedAt      DateTime?
+
+  godownId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  partyId   String
+  party     Party   @relation(fields: [partyId], references: [id])
+  godown    Godown? @relation(fields: [godownId], references: [id])
+
+  sourceDocument OrderDocument?  @relation("DocumentChain", fields: [sourceDocumentId], references: [id])
+  derivedDocuments OrderDocument[] @relation("DocumentChain")
+
+  items OrderDocumentItem[]
+
+  @@unique([companyId, number])
+  @@index([companyId, docType, date])
+  @@index([companyId, docType, status])
+}
+
+model OrderDocumentItem {
+  id       String  @id @default(cuid())
+  itemId   String?
+  itemName String
+  hsn      String?
+  quantity Float
+  // How much of this line has been delivered (SO/DC) or received (PO/GRN).
+  // Lets a single order be fulfilled across several despatches.
+  fulfilledQuantity Float @default(0)
+  unit     String  @default("NOS")
+  ratePaise     Int
+  discountPaise Int @default(0)
+  apportionedDiscountPaise Int @default(0)
+  taxablePaise  Int @default(0)
+  gstRate    Float @default(0)
+  cessRate   Float @default(0)
+  cessPerUnitPaise Int @default(0)
+  cgstPaise  Int @default(0)
+  sgstPaise  Int @default(0)
+  igstPaise  Int @default(0)
+  cessPaise  Int @default(0)
+  totalPaise Int @default(0)
+  supplyType String @default("TAXABLE")
+  pricingMode String @default("EXCLUSIVE")
+
+  documentId String
+  document   OrderDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  item       Item?         @relation(fields: [itemId], references: [id])
+
+  @@index([documentId])
+}
+
 model CreditNote {
   id           String   @id @default(cuid())
   number       String
@@ -567,6 +690,7 @@ model Godown {
   items          Item[]
   transfersFrom  StockTransfer[] @relation("TransferFrom")
   transfersTo    StockTransfer[] @relation("TransferTo")
+  orderDocuments OrderDocument[]
 
   @@index([companyId])
 }

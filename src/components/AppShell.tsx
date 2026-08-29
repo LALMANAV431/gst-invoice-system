@@ -31,6 +31,7 @@ import {
   Eye,
   Sparkles,
   BookOpenCheck,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -48,6 +49,7 @@ const NAV: NavItem[] = [
   { href: "/parties", labelKey: "nav.parties", icon: Users },
   { href: "/items", labelKey: "nav.items", icon: Boxes },
   { href: "/quotations", labelKey: "nav.quotations", icon: FileSpreadsheet, flag: "flag_quotations" },
+  { href: "/orders", labelKey: "nav.orders", icon: ClipboardList, flag: "flag_orders" },
   { href: "/invoices", labelKey: "nav.invoices", icon: FileText },
   { href: "/purchases", labelKey: "nav.purchases", icon: ShoppingCart },
   { href: "/credit-notes", labelKey: "nav.creditNotes", icon: RotateCcw, flag: "flag_credit_notes" },

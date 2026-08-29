@@ -17,6 +17,7 @@ export const en = {
   "nav.parties": "Parties",
   "nav.items": "Items",
   "nav.quotations": "Quotations",
+  "nav.orders": "Orders & Challans",
   "nav.invoices": "Sales Invoices",
   "nav.purchases": "Purchases",
   "nav.creditNotes": "Credit/Debit Notes",
