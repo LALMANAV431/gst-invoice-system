@@ -15,7 +15,9 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:admin": "tsx prisma/seed-admin.ts",
     "db:setup": "prisma db push && tsx prisma/seed.ts",
-    "package:portable": "next build && node scripts/package-portable.mjs"
+    "package:portable": "next build && node scripts/package-portable.mjs",
+    "docs:openapi": "tsx scripts/write-openapi.mjs",
+    "docs:openapi:check": "tsx scripts/write-openapi.mjs --check"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

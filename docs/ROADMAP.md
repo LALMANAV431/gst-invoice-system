@@ -194,6 +194,15 @@ feature degrades cleanly to unavailable when `AI_ENABLED=false`.
 - [ ] White-label with custom domains
 - [ ] Background jobs (`pg-boss`); Redis caching
 
+### Access control follow-up
+
+- **`OPERATOR` and `ACCOUNTANT` are currently the same permission.** Both can create every
+  document; neither can lock a period, export or erase data, or register a webhook. A user who
+  picks `OPERATOR` expecting a narrower role does not get one, which is worse than not offering
+  it. Either give it a real, narrower set (documents but not ledger vouchers, say) or remove
+  it. Removing it needs a migration for existing rows, which is why it has not been done
+  casually.
+
 ### Inventory follow-ups
 
 Deliberately left out of the valuation work, with the reasoning recorded so the

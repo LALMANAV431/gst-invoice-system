@@ -22,7 +22,7 @@ export default async function AdminOverviewPage() {
   for (const c of companies) {
     const active = planActive(c.plan, c.planExpiry) as PlanId;
     counts[active] = (counts[active] || 0) + 1;
-    const price = plans[active]?.price || 0;
+    const price = plans[active]?.priceMonthlyPaise || 0;
     revenue[active] += price;
     mrr += price;
   }

@@ -1,0 +1,137 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please replace any real GSTIN, PAN, Aadhaar number, bank detail or
+        customer name with a placeholder. This repository must not contain real tax
+        identifiers or personal data — issues included.
+
+        **Found a security problem?** Do not file it here. See
+        [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create an item with GST 18% and a sale price of Rs 100
+        2. Raise an invoice for 3 units with a Rs 50 whole-bill discount
+        3. Look at the tax total
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Invoicing / quotations / credit notes
+        - Purchases / expenses
+        - Payments / payment links
+        - Inventory / stock valuation
+        - Orders / challans / GRN
+        - Accounting / ledgers / journal
+        - Reports / GSTR-1
+        - Notifications / email
+        - Authentication / two-factor / roles
+        - AI features
+        - Admin panel / plans / billing
+        - Setup / deployment / Docker
+        - Other
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ### If a number is wrong
+
+        The next three fields are what make a calculation bug diagnosable. Please fill them in
+        for anything involving an amount — otherwise the first reply will only be a request for
+        them.
+
+  - type: textarea
+    id: numbers
+    attributes:
+      label: The figures
+      description: What the application showed, and what it should have been.
+      placeholder: |
+        Taxable value: Rs 250.00  (correct)
+        Tax shown:     Rs 54.00
+        Tax expected:  Rs 45.00
+        Grand total:   Rs 304.00, expected Rs 295.00
+    validations:
+      required: false
+
+  - type: textarea
+    id: tax-config
+    attributes:
+      label: Tax configuration
+      description: These change the arithmetic, so all of them matter.
+      placeholder: |
+        Supplier state: 29 (Karnataka)
+        Place of supply: 27 (Maharashtra) — so IGST
+        GST rate: 18%
+        Cess: none
+        Supply type: TAXABLE
+        Pricing mode: EXCLUSIVE
+        Discount: Rs 50 at bill level
+        Reverse charge: no
+        GST scheme: REGULAR
+        Round totals: on
+    validations:
+      required: false
+
+  - type: input
+    id: valuation-method
+    attributes:
+      label: Stock valuation method
+      description: For inventory issues only. Settings → Stock valuation.
+      placeholder: FIFO
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        Version / commit: 757b784
+        Node: 20.11.0
+        Database: SQLite (default) / PostgreSQL 16
+        Browser: Firefox 129
+        Deployment: local dev / Docker / hosted
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors
+      description: Relevant server output or browser console errors. Redact anything identifying.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have removed all real GSTINs, PANs, bank details and personal data
+          required: true
+        - label: I checked Reports → Trial Balance, and noted below whether it balances
+          required: false
+        - label: This is not a security vulnerability (those go to SECURITY.md)
+          required: true

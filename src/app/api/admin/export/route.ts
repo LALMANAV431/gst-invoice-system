@@ -31,7 +31,7 @@ export async function GET(req: Request) {
         _count: { select: { invoices: true } },
       },
     });
-    const headers = ["Company", "GSTIN", "Owner", "Email", "Plan", "Monthly Price", "Suspended", "Invoices", "Joined"];
+    const headers = ["Company", "GSTIN", "Owner", "Email", "Plan", "Monthly Price (paise)", "Suspended", "Invoices", "Joined"];
     const rows = companies.map((c) => {
       const active = planActive(c.plan, c.planExpiry) as PlanId;
       return [
@@ -40,7 +40,8 @@ export async function GET(req: Request) {
         c.owner.name,
         c.owner.email,
         active,
-        plans[active]?.price || 0,
+        // Paise, matching every other money column in the export.
+        plans[active]?.priceMonthlyPaise || 0,
         c.isSuspended ? "Yes" : "No",
         c._count.invoices,
         new Date(c.createdAt).toLocaleDateString("en-IN"),

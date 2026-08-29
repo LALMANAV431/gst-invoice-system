@@ -25,8 +25,17 @@ multi-tenant SaaS web application.
 | GSTR-1 export, day book, party ledger, outstanding | Working |
 | PDF invoices, UPI QR, CSV import, PWA, dark mode | Working |
 | Super-admin panel, plans, coupons, tickets, audit log | Working |
-| Payment gateway, AI features, e-invoice IRP integration | Not built — see roadmap |
-| Hindi UI translation | Not built — English only today |
+| **Hindi + English UI** | **Working — a missing translation is a compile error** |
+| **Inventory valuation: FIFO / weighted average, COGS, ageing, dead stock, batch expiry** | **Working** |
+| **Stock adjustments and physical stock counts** | **Working** |
+| **Payment links + signature-verified idempotent gateway webhooks** | **Working (mock gateway by default)** |
+| **Notifications, reminders, email, outbound webhooks** | **Working (mock email by default)** |
+| **Two-factor authentication (TOTP) + DPDP data export / erasure** | **Working** |
+| **AI: bill OCR, assistant, expense categorisation** | **Working — optional, mock provider by default** |
+| **Journal + contra vouchers, cash book, cash flow, year closing** | **Working** |
+| **Sales orders, delivery challans, purchase orders, GRNs** | **Working** |
+| **OpenAPI 3.1 spec, kept in sync with the routes by a test** | **Working — `GET /api/openapi`** |
+| E-invoice IRP / e-way bill integration | Endpoints exist; needs GSP credentials |
 
 ### Correctness
 
@@ -43,8 +52,19 @@ engine. The defects the original code carried are fixed and covered by regressio
 | Invoice numbers allocated outside the transaction (raced) | Atomic counter inside the transaction, FY-scoped |
 | No ledger; reports summed document tables | Double-entry ledger; every document posts a balanced entry |
 
-**98 tests** cover the money, GST and accounting engines. The seed refuses to finish if the
-books it creates do not balance, and `/reports/trial-balance` shows the live position.
+Inventory valuation was the same class of defect: closing stock was valued at the item's
+**current** purchase price, so raising a supplier's price silently revalued stock already held
+and moved profit between periods. It is now assigned by FIFO or weighted average from the
+stock movement register, with an invariant that holds exactly in integer paise:
+
+```
+openingValue + inValue === costOfGoodsSold + closingValue
+```
+
+**321 tests** cover the money, GST, accounting, inventory, TOTP, i18n, AI, payment and
+notification layers, including a 200-case randomised property test for that invariant. The
+seed refuses to finish if the books it creates do not balance, or if any item's stock quantity
+disagrees with its movement register.
 
 Still not production-ready — see [`SECURITY.md`](SECURITY.md) and
 [`docs/ROADMAP.md`](docs/ROADMAP.md). The main gaps are a Next.js 16 upgrade (5 open `high`
@@ -146,6 +166,8 @@ provider first — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 | `npm run db:seed` | Load demo data (tenant admin only) |
 | `npm run db:seed:admin` | Create/promote a platform super-admin |
 | `npm run db:setup` | `db:push` + `db:seed` |
+| `npm run docs:openapi` | Regenerate `docs/openapi.json` from `src/lib/openapi.ts` |
+| `npm run docs:openapi:check` | Fail if that file is stale (runs in CI) |
 | `npm run package:portable` | Build the portable USB edition |
 
 ---
@@ -157,25 +179,51 @@ recurring invoices, e-invoice and e-way bill fields, PDF export, UPI QR, WhatsAp
 
 **Purchases** — purchase invoices, supplier ledgers, purchase registers, debit notes.
 
-**Inventory** — products and services, HSN/SAC, multiple godowns, stock movements, stock
-transfers, low-stock alerts, opening stock, barcode support.
+**Orders and goods movement** — sales orders, delivery challans (with transporter, vehicle
+and movement reason), purchase orders, goods receipt notes, partial fulfilment tracking, and
+a goods-received-not-invoiced report.
 
-**Accounting** — payments and receipts with invoice allocation, expenses, bank
-transactions with reconciliation matching, budgets, day book, party ledgers, outstanding
-and ageing reports.
+**Inventory** — products and services, HSN/SAC, multiple godowns, stock transfers,
+low-stock alerts, barcode support, and a full stock register. Valuation by **FIFO or weighted
+average** with cost of goods sold, stock ageing, dead-stock and batch-expiry reports, stock
+adjustments with fixed reason codes, and physical stock counts that post their variance as a
+single audited adjustment.
 
-**GST** — intra-state CGST/SGST vs inter-state IGST, place-of-supply logic, GSTR-1 export,
-TDS fields, GSTIN capture.
+**Accounting** — double-entry ledger with a standard chart of accounts, manual journal and
+contra vouchers, payments and receipts with invoice allocation, expenses, bank reconciliation,
+budgets, day book, party ledgers, outstanding and ageing, cash and bank book, cash flow
+(direct method), and financial-year locking and closing.
+
+**Statements** — trial balance, profit and loss, balance sheet, GST summary.
+
+**GST** — intra-state CGST/SGST vs inter-state IGST, place-of-supply logic, compensation cess
+(rate and per unit), the four zero-rate supply types kept distinct, reverse charge, composition
+scheme, inclusive/MRP pricing, discount before tax, TDS reported separately, round-off,
+GSTIN checksum validation, GSTR-1 export with JSON.
+
+**Payments** — payment links with unguessable tokens, signature-verified idempotent gateway
+webhooks, partial settlement. Runs against a mock gateway with no credentials.
+
+**Notifications** — in-app centre, escalating overdue reminders, low-stock, GST-due and
+books-unbalanced alerts, email, and HMAC-signed outbound webhooks.
+
+**Security** — TOTP two-factor authentication with recovery codes, revocable sessions, rate
+limiting, CSRF origin checks, content security policy, magic-byte upload validation, audit
+log, and DPDP data export and erasure with GST retention warnings.
+
+**AI (optional)** — bill OCR into a reviewable draft, a natural-language assistant grounded in
+real ledger figures, and expense categorisation. Runs on a deterministic mock provider by
+default; the application is fully functional with no API key.
 
 **Multi-tenant SaaS** — companies as tenants, team members with roles
 (`ADMIN`/`ACCOUNTANT`/`OPERATOR`/`VIEWER`), plan limits (Free/Basic/Premium), coupons,
-support tickets, broadcasts, feature flags, audit log, super-admin panel with
-impersonation.
+support tickets, broadcasts, feature flags, super-admin panel.
 
-**Platform** — PWA with offline shell, dark mode, CSV import, portable USB build.
+**Platform** — Hindi and English UI, PWA with offline shell, dark mode, CSV import,
+OpenAPI 3.1 spec at `GET /api/openapi`, Docker, portable USB build.
 
-For what is *not* built yet — double-entry ledger, trial balance, P&L, balance sheet,
-GSTR-3B, e-invoice IRP integration, payment gateway, AI features — see
+For what is *not* built — e-invoice IRP integration, e-way bill API, serial-number tracking,
+manufacturing, customer portal — and for what was deliberately deferred and why, see
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ---
@@ -184,6 +232,13 @@ GSTR-3B, e-invoice IRP integration, payment gateway, AI features — see
 
 | Document | Contents |
 |---|---|
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | **Start here if you use the app.** Billing, GST, stock, reports |
+| [`docs/ADMIN_GUIDE.md`](docs/ADMIN_GUIDE.md) | Company administration, and running the platform |
+| [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) | **Start here to contribute.** Conventions, and traps that have bitten |
+| [`docs/INVENTORY_VALUATION.md`](docs/INVENTORY_VALUATION.md) | FIFO/weighted average, COGS, the conservation invariant |
+| [`docs/openapi.json`](docs/openapi.json) | OpenAPI 3.1 spec, also served at `GET /api/openapi` |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed, with the wrong numbers and the right ones |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute, and the review checklist |
 | [`docs/AUDIT.md`](docs/AUDIT.md) | Repository audit: findings, evidence, severity |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Target architecture, folder layout, AI service design |
 | [`docs/DATABASE.md`](docs/DATABASE.md) | Current and target schema, double-entry model |
@@ -199,13 +254,17 @@ GSTR-3B, e-invoice IRP integration, payment gateway, AI features — see
 
 ## Contributing
 
-1. Branch from `main`.
-2. Keep `npm run lint`, `npm run typecheck` and `npm test` green.
-3. Any change touching money or GST **must** come with tests. See
-   `src/lib/gst.test.ts` for the expected style — assert against
-   independently-known-correct values, not against whatever the implementation
-   currently returns.
-4. Never commit `.env`, real GSTINs, PANs, bank details or API keys.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide. The essentials:
+
+1. Branch from `main`. Keep `npm run lint`, `npm run typecheck`, `npm test` and
+   `npm run build` green.
+2. Any change touching money or GST **must** come with tests. See `src/lib/gst.test.ts` for
+   the expected style — assert against independently-known-correct values, not against
+   whatever the implementation currently returns.
+3. Money is **integer paise**, in fields named `...Paise`. Never a float.
+4. `companyId` comes from the session, never from a request body.
+5. New endpoints must be described in `src/lib/openapi.ts` — a test fails until they are.
+6. Never commit `.env`, or real GSTINs, PANs, Aadhaar numbers, bank details or API keys.
 
 ---
 

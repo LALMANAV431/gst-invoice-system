@@ -1,0 +1,23 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/LALMANAV431/gst-invoice-system/blob/main/SECURITY.md
+    about: >
+      Do not open a public issue. SECURITY.md explains how to report privately, and lists the
+      known open items so you can check whether it is already tracked.
+
+  - name: How do I ...?
+    url: https://github.com/LALMANAV431/gst-invoice-system/blob/main/docs/USER_GUIDE.md
+    about: >
+      The user guide covers billing, GST, stock and reports, plus a table of operations the
+      software deliberately refuses and why.
+
+  - name: Setup or deployment problem
+    url: https://github.com/LALMANAV431/gst-invoice-system/blob/main/docs/DEPLOYMENT.md
+    about: Docker, PostgreSQL, environment variables and the health check.
+
+  - name: Why was my number calculated that way?
+    url: https://github.com/LALMANAV431/gst-invoice-system/blob/main/docs/GST_COMPLIANCE_NOTES.md
+    about: >
+      The exact GST rules implemented, with worked examples. For stock values see
+      INVENTORY_VALUATION.md.

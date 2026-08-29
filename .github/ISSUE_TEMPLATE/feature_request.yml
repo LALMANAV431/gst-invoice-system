@@ -1,0 +1,85 @@
+name: Feature request
+description: Suggest something the application should do
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check [docs/ROADMAP.md](../blob/main/docs/ROADMAP.md) first — it lists what is
+        planned, and also what was deliberately **not** built and why. If your idea is there
+        as deferred, the most useful thing you can add is why the reasoning does not hold for
+        your situation.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: >
+        Describe the situation you are in, not the feature. "I cannot tell which supplier
+        bills are still unpaid past 60 days" is more useful than "add a filter", because it
+        leaves room for a better answer than the one you had in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Invoicing / sales documents
+        - Purchases / expenses
+        - Payments / collections
+        - Inventory / stock
+        - Accounting / ledgers
+        - Reports / GST returns
+        - Compliance (e-invoice, e-way bill, TDS/TCS)
+        - Notifications / communication
+        - Security / access control
+        - AI features
+        - Admin / billing / plans
+        - Developer experience / API
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: compliance
+    attributes:
+      label: Statutory basis
+      description: >
+        If this is a GST, TDS, DPDP or accounting-standard requirement, cite the rule, form or
+        section. A citation is the difference between a feature we can implement correctly and
+        one we have to guess at.
+      placeholder: |
+        e.g. Rule 46(b) CGST Rules — invoice number, 16 characters, consecutive series
+        e.g. AS 2 — inventory at the lower of cost and net realisable value
+        e.g. GSTR-3B table 4 — eligible ITC breakdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: current-workaround
+    attributes:
+      label: What you do today instead
+      description: Including "we keep it in a spreadsheet" — that tells us how much this hurts.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who needs this
+      options:
+        - Just me / my business
+        - Common for my industry
+        - Most users would want it
+        - Required for legal compliance
+    validations:
+      required: true

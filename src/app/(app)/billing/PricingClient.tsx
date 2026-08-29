@@ -11,7 +11,7 @@ type SerialPlan = {
   id: PlanId;
   name: string;
   tagline?: string | null;
-  price: number;
+  priceMonthlyPaise: number;
   priceAnnualPaise: number;
   invoiceLimit: number | null; // null = unlimited
   userLimit: number;
@@ -97,7 +97,7 @@ export default function PricingClient({
   }
 
   function priceFor(p: SerialPlan) {
-    return billing === "annual" ? p.priceAnnualPaise : p.price;
+    return billing === "annual" ? p.priceAnnualPaise : p.priceMonthlyPaise;
   }
 
   return (
